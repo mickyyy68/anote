@@ -1,0 +1,12 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="1024" height="1024" viewBox="0 0 1024 1024">
+  <defs>
+    <linearGradient id="bg" x1="0" y1="0" x2="0" y2="1">
+      <stop offset="0%" stop-color="#F7F2EA"/>
+      <stop offset="100%" stop-color="#EDE7DB"/>
+    </linearGradient>
+  </defs>
+  <!-- Rounded square background -->
+  <rect width="1024" height="1024" rx="228" fill="url(#bg)"/>
+  <!-- "a" in dark, "n" in accent — like the sidebar logo -->
+  <text x="512" y="680" text-anchor="middle" font-family="Georgia, 'Times New Roman', serif" font-style="normal" font-size="520" fill="#2C2825" letter-spacing="-30">a<tspan fill="#B85C38">n</tspan></text>
+</svg>

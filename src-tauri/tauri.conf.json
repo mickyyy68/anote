@@ -4,7 +4,10 @@
   "version": "0.1.0",
   "identifier": "com.anote.app",
   "build": {
-    "frontendDist": "../"
+    "beforeDevCommand": "bun run vite:dev",
+    "beforeBuildCommand": "bun run vite:build",
+    "devUrl": "http://localhost:5173",
+    "frontendDist": "../dist"
   },
   "app": {
     "windows": [
@@ -18,7 +21,7 @@
         "fullscreen": false
       }
     ],
-    "withGlobalTauri": true,
+    "withGlobalTauri": false,
     "security": {
       "csp": null
     }

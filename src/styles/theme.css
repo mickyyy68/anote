@@ -1,0 +1,51 @@
+:root {
+  --transition-speed: 0.3s;
+}
+
+[data-theme="light"] {
+  --bg-primary: #F5F0E8;
+  --bg-secondary: #EDE7DB;
+  --bg-tertiary: #E5DFD3;
+  --bg-editor: #FAF7F2;
+  --text-primary: #2C2825;
+  --text-secondary: #6B6560;
+  --text-tertiary: #9B9590;
+  --accent: #B85C38;
+  --accent-hover: #A04E2E;
+  --accent-subtle: rgba(184, 92, 56, 0.08);
+  --border: rgba(44, 40, 37, 0.08);
+  --border-strong: rgba(44, 40, 37, 0.15);
+  --shadow-sm: 0 1px 2px rgba(44, 40, 37, 0.04);
+  --shadow-md: 0 4px 12px rgba(44, 40, 37, 0.06);
+  --grain-opacity: 0.03;
+  --folder-icon-bg: rgba(184, 92, 56, 0.06);
+  --scrollbar-thumb: rgba(44, 40, 37, 0.12);
+  --scrollbar-thumb-hover: rgba(44, 40, 37, 0.2);
+  --selection-bg: rgba(184, 92, 56, 0.12);
+  --tooltip-bg: #2C2825;
+  --tooltip-text: #F5F0E8;
+}
+
+[data-theme="dark"] {
+  --bg-primary: #1A1816;
+  --bg-secondary: #211F1C;
+  --bg-tertiary: #2A2724;
+  --bg-editor: #1E1C19;
+  --text-primary: #E8E2D8;
+  --text-secondary: #9B9590;
+  --text-tertiary: #6B6560;
+  --accent: #D4845A;
+  --accent-hover: #E0956B;
+  --accent-subtle: rgba(212, 132, 90, 0.08);
+  --border: rgba(232, 226, 216, 0.06);
+  --border-strong: rgba(232, 226, 216, 0.1);
+  --shadow-sm: 0 1px 2px rgba(0, 0, 0, 0.15);
+  --shadow-md: 0 4px 12px rgba(0, 0, 0, 0.2);
+  --grain-opacity: 0.025;
+  --folder-icon-bg: rgba(212, 132, 90, 0.08);
+  --scrollbar-thumb: rgba(232, 226, 216, 0.1);
+  --scrollbar-thumb-hover: rgba(232, 226, 216, 0.18);
+  --selection-bg: rgba(212, 132, 90, 0.15);
+  --tooltip-bg: #E8E2D8;
+  --tooltip-text: #1A1816;
+}

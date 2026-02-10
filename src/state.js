@@ -1,0 +1,77 @@
+import { invoke } from '@tauri-apps/api/core';
+
+const STORAGE_KEY = 'anote_data';
+const THEME_KEY = 'anote_theme';
+
+export const state = {
+  data: { folders: [], notes: [] },
+  activeFolderId: null,
+  activeNoteId: null,
+  editingFolderId: null,
+  contextMenu: null,
+};
+
+export const DataLayer = {
+  async load() {
+    try {
+      const folders = await invoke('get_folders');
+      const notes = await invoke('get_notes_all');
+      state.data.folders = folders.map(f => ({
+        id: f.id, name: f.name, createdAt: f.created_at
+      }));
+      state.data.notes = notes.map(n => ({
+        id: n.id, folderId: n.folder_id, title: n.title,
+        body: n.body, createdAt: n.created_at, updatedAt: n.updated_at
+      }));
+    } catch (e) {
+      console.error('Failed to load data:', e);
+      state.data = { folders: [], notes: [] };
+    }
+  },
+};
+
+export async function migrateLocalStorage() {
+  const raw = localStorage.getItem(STORAGE_KEY);
+  if (!raw) return;
+  try {
+    const data = JSON.parse(raw);
+    if (data.folders && data.folders.length > 0) {
+      const folders = data.folders.map(f => ({
+        id: f.id, name: f.name, created_at: f.createdAt
+      }));
+      const notes = (data.notes || []).map(n => ({
+        id: n.id, folder_id: n.folderId, title: n.title || '',
+        body: n.body || '', created_at: n.createdAt, updated_at: n.updatedAt
+      }));
+      await invoke('import_data', { folders, notes });
+    }
+    localStorage.removeItem(STORAGE_KEY);
+  } catch (e) {
+    console.error('Migration failed:', e);
+  }
+}
+
+export function loadTheme() {
+  return localStorage.getItem(THEME_KEY) || 'light';
+}
+
+export function saveTheme(theme) {
+  localStorage.setItem(THEME_KEY, theme);
+  document.documentElement.setAttribute('data-theme', theme);
+}
+
+export function generateId() {
+  return Date.now().toString(36) + Math.random().toString(36).slice(2, 7);
+}
+
+export function formatDate(ts) {
+  const d = new Date(ts);
+  const months = ['Jan','Feb','Mar','Apr','May','Jun','Jul','Aug','Sep','Oct','Nov','Dec'];
+  return `${months[d.getMonth()]} ${d.getDate()}, ${d.getFullYear()}`;
+}
+
+export function escapeHtml(str) {
+  const div = document.createElement('div');
+  div.textContent = str;
+  return div.innerHTML;
+}
