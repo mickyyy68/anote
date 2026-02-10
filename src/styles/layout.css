@@ -14,16 +14,39 @@
   transition: background var(--transition-speed);
 }
 
+.sidebar-expand-btn {
+  width: 32px;
+  height: 32px;
+  border-radius: 8px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  flex-shrink: 0;
+  color: var(--text-tertiary);
+  transition: all 0.2s;
+}
+
+.sidebar-expand-btn:hover {
+  background: var(--bg-tertiary);
+  color: var(--text-secondary);
+}
+
+.sidebar-expand-btn svg {
+  width: 16px;
+  height: 16px;
+}
+
 .notes-header {
   padding: 20px 28px 12px;
   display: flex;
   align-items: center;
-  justify-content: space-between;
+  gap: 8px;
   border-bottom: 1px solid var(--border);
   transition: border-color var(--transition-speed);
 }
 
 .notes-header-title {
+  flex: 1;
   font-family: 'Instrument Serif', serif;
   font-size: 20px;
   color: var(--text-primary);

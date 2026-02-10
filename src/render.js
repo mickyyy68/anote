@@ -40,9 +40,14 @@ function renderSidebar() {
   root.innerHTML = `
     <div class="sidebar-header">
       <div class="logo">a<span>note</span></div>
-      <button class="theme-toggle" onclick="toggleTheme()" title="Toggle theme">
-        ${theme === 'light' ? icons.moon : icons.sun}
-      </button>
+      <div class="sidebar-header-actions">
+        <button class="theme-toggle" onclick="toggleTheme()" title="Toggle theme">
+          ${theme === 'light' ? icons.moon : icons.sun}
+        </button>
+        <button class="theme-toggle" onclick="toggleSidebar()" title="Toggle sidebar">
+          ${icons.panelLeft}
+        </button>
+      </div>
     </div>
 
     <div class="folders-section">
@@ -116,7 +121,13 @@ function renderNotesHeader() {
   if (!root) return;
   const { data, activeFolderId } = state;
   const activeFolder = data.folders.find(f => f.id === activeFolderId);
+  const expandBtn = state.sidebarCollapsed ? `
+    <button class="sidebar-expand-btn" onclick="toggleSidebar()" title="Show sidebar">
+      ${icons.panelLeft}
+    </button>
+  ` : '';
   root.innerHTML = `
+    ${expandBtn}
     <h2 class="notes-header-title">${activeFolder ? escapeHtml(activeFolder.name) : ''}</h2>
     <button class="add-note-btn" onclick="addNote()">
       ${icons.plus}
@@ -229,9 +240,10 @@ export async function render(options = {}) {
     await destroyEditor();
     currentEditorNoteId = null;
 
+    const collapsedClass = state.sidebarCollapsed ? ' collapsed' : '';
     if (!activeFolderId) {
       app.innerHTML = `
-        <aside class="sidebar" id="sidebar-root"></aside>
+        <aside class="sidebar${collapsedClass}" id="sidebar-root"></aside>
         <main class="main">
           <div class="no-folder-state">
             <div class="empty-notes-icon">${icons.quill}</div>
@@ -242,7 +254,7 @@ export async function render(options = {}) {
       `;
     } else {
       app.innerHTML = `
-        <aside class="sidebar" id="sidebar-root"></aside>
+        <aside class="sidebar${collapsedClass}" id="sidebar-root"></aside>
         <main class="main" id="main-root">
           <div class="notes-header" id="notes-header-root"></div>
           <div class="content-area">
@@ -275,6 +287,14 @@ function toggleTheme() {
   const next = current === 'light' ? 'dark' : 'light';
   saveTheme(next);
   render();
+}
+
+function toggleSidebar() {
+  state.sidebarCollapsed = !state.sidebarCollapsed;
+  const sidebar = document.getElementById('sidebar-root');
+  if (sidebar) sidebar.classList.toggle('collapsed', state.sidebarCollapsed);
+  // Re-render header to show/hide expand button inline
+  renderNotesHeader();
 }
 
 // ===== FOLDER ACTIONS =====
@@ -482,6 +502,7 @@ document.addEventListener('keydown', (e) => {
 
 // ===== EXPOSE TO WINDOW FOR INLINE HANDLERS =====
 window.toggleTheme = toggleTheme;
+window.toggleSidebar = toggleSidebar;
 window.addFolder = addFolder;
 window.selectFolder = selectFolder;
 window.startEditingFolder = startEditingFolder;

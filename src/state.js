@@ -9,6 +9,7 @@ export const state = {
   activeNoteId: null,
   editingFolderId: null,
   contextMenu: null,
+  sidebarCollapsed: false,
 };
 
 export const DataLayer = {

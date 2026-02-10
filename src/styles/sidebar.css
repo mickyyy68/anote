@@ -5,8 +5,15 @@
   border-right: 1px solid var(--border);
   display: flex;
   flex-direction: column;
-  transition: background var(--transition-speed), border-color var(--transition-speed);
+  transition: width 0.25s ease, min-width 0.25s ease, background var(--transition-speed), border-color var(--transition-speed);
   position: relative;
+  overflow: hidden;
+}
+
+.sidebar.collapsed {
+  width: 0;
+  min-width: 0;
+  border-right: none;
 }
 
 .sidebar-header {
@@ -14,6 +21,12 @@
   display: flex;
   align-items: center;
   justify-content: space-between;
+}
+
+.sidebar-header-actions {
+  display: flex;
+  align-items: center;
+  gap: 2px;
 }
 
 .logo {
