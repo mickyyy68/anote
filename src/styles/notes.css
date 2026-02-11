@@ -11,10 +11,9 @@
   padding: 12px 14px;
   border-radius: 8px;
   cursor: pointer;
-  transition: all 0.15s;
+  transition: background 0.15s;
   margin-bottom: 2px;
   position: relative;
-  animation: slideIn 0.2s ease both;
 }
 
 .note-card:hover {
@@ -63,7 +62,7 @@
   justify-content: center;
   color: var(--text-tertiary);
   opacity: 0;
-  transition: all 0.15s;
+  transition: opacity 0.15s, background 0.15s, color 0.15s;
 }
 
 .note-card:hover .note-card-delete {

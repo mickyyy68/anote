@@ -10,22 +10,15 @@ let currentFolderId = null;
 
 function stripMarkdown(md) {
   return md
-    .replace(/^#{1,6}\s+/gm, '')          // headings
-    .replace(/\*\*(.+?)\*\*/g, '$1')       // bold
-    .replace(/__(.+?)__/g, '$1')            // bold alt
-    .replace(/\*(.+?)\*/g, '$1')            // italic
-    .replace(/_(.+?)_/g, '$1')              // italic alt
-    .replace(/~~(.+?)~~/g, '$1')            // strikethrough
-    .replace(/`(.+?)`/g, '$1')             // inline code
-    .replace(/^>\s+/gm, '')                 // blockquotes
-    .replace(/^[-*+]\s+/gm, '')             // unordered lists
-    .replace(/^\d+\.\s+/gm, '')             // ordered lists
-    .replace(/^- \[[ x]\]\s+/gm, '')        // checkboxes
-    .replace(/\[([^\]]+)\]\([^)]+\)/g, '$1') // links
-    .replace(/^---+$/gm, '')                // horizontal rules
-    .replace(/\|/g, ' ')                    // table pipes
-    .replace(/\n{2,}/g, ' ')               // collapse newlines
-    .replace(/\n/g, ' ')
+    .replace(/^#{1,6}\s+/gm, '')                    // headings
+    .replace(/(\*{1,2}|_{1,2}|~~)(.+?)\1/g, '$2')   // bold, italic, strikethrough
+    .replace(/`(.+?)`/g, '$1')                       // inline code
+    .replace(/^>\s+/gm, '')                           // blockquotes
+    .replace(/^(?:[-*+]|\d+\.|- \[[ x]\])\s+/gm, '') // all list types
+    .replace(/\[([^\]]+)\]\([^)]+\)/g, '$1')          // links
+    .replace(/^---+$/gm, '')                          // horizontal rules
+    .replace(/\|/g, ' ')                              // table pipes
+    .replace(/\n+/g, ' ')                             // collapse newlines
     .trim();
 }
 
@@ -65,12 +58,14 @@ function renderSidebar() {
         </div>
       ` : `
         <ul class="folder-list">
-          ${data.folders.map((folder, i) => {
-            const count = data.notes.filter(n => n.folderId === folder.id).length;
+          ${(() => {
+            const countMap = {};
+            data.notes.forEach(n => { countMap[n.folderId] = (countMap[n.folderId] || 0) + 1; });
+            return data.folders.map((folder, i) => {
+            const count = countMap[folder.id] || 0;
             const isEditing = editingFolderId === folder.id;
             return `
               <li class="folder-item ${activeFolderId === folder.id ? 'active' : ''}"
-                  style="animation-delay: ${i * 30}ms"
                   onclick="selectFolder('${folder.id}')"
                   oncontextmenu="showFolderContextMenu(event, '${folder.id}')">
                 <div class="folder-icon">${icons.folder}</div>
@@ -96,7 +91,8 @@ function renderSidebar() {
                 </div>
               </li>
             `;
-          }).join('')}
+          }).join('');
+          })()}
         </ul>
       `}
     </div>
@@ -155,7 +151,6 @@ function renderNotesList() {
   } else {
     root.innerHTML = folderNotes.map((note, i) => `
       <div class="note-card ${activeNoteId === note.id ? 'active' : ''}"
-           style="animation-delay: ${i * 30}ms"
            onclick="selectNote('${note.id}')"
            data-note-id="${note.id}">
         <div class="note-card-title">${escapeHtml(note.title || 'Untitled')}</div>
@@ -240,7 +235,7 @@ async function renderEditorPanel(focusTitle) {
 export async function render(options = {}) {
   const app = document.getElementById('app');
   const { activeFolderId, activeNoteId } = state;
-  const layoutChanged = !app.children.length || (currentFolderId === null) !== (activeFolderId === null) || (currentFolderId !== null && activeFolderId === null) || (currentFolderId === null && activeFolderId !== null);
+  const layoutChanged = !app.children.length || (currentFolderId === null) !== (activeFolderId === null);
 
   if (layoutChanged || !app.children.length) {
     // Full skeleton rebuild
@@ -428,8 +423,19 @@ async function addNote() {
 }
 
 function selectNote(id) {
+  const prevId = state.activeNoteId;
   state.activeNoteId = id;
-  render();
+
+  // Toggle active class directly instead of full rebuild
+  if (prevId) {
+    const prevCard = document.querySelector(`.note-card[data-note-id="${prevId}"]`);
+    if (prevCard) prevCard.classList.remove('active');
+  }
+  const newCard = document.querySelector(`.note-card[data-note-id="${id}"]`);
+  if (newCard) newCard.classList.add('active');
+
+  // Only rebuild the editor
+  renderEditorPanel();
 }
 
 let saveTimeout;

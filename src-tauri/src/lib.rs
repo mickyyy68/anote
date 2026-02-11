@@ -33,7 +33,15 @@ struct NoteMetadata {
 }
 
 fn init_db(conn: &Connection) {
-    conn.execute_batch("PRAGMA foreign_keys = ON;").unwrap();
+    conn.execute_batch(
+        "
+        PRAGMA journal_mode = WAL;
+        PRAGMA synchronous = NORMAL;
+        PRAGMA cache_size = -2000;
+        PRAGMA foreign_keys = ON;
+        ",
+    )
+    .unwrap();
     conn.execute_batch(
         "
         CREATE TABLE IF NOT EXISTS folders (
@@ -50,6 +58,8 @@ fn init_db(conn: &Connection) {
             created_at INTEGER NOT NULL,
             updated_at INTEGER NOT NULL
         );
+
+        CREATE INDEX IF NOT EXISTS idx_notes_folder ON notes(folder_id);
 
         CREATE VIRTUAL TABLE IF NOT EXISTS notes_fts USING fts5(
             title, body, content=notes, content_rowid=rowid
@@ -233,21 +243,23 @@ fn delete_note(db: State<Db>, id: String) -> Result<(), String> {
 
 #[tauri::command]
 fn import_data(db: State<Db>, folders: Vec<Folder>, notes: Vec<Note>) -> Result<(), String> {
-    let conn = db.0.lock().map_err(|e| e.to_string())?;
-    for folder in folders {
-        conn.execute(
+    let mut conn = db.0.lock().map_err(|e| e.to_string())?;
+    let tx = conn.transaction().map_err(|e| e.to_string())?;
+    for folder in &folders {
+        tx.execute(
             "INSERT OR IGNORE INTO folders (id, name, created_at) VALUES (?1, ?2, ?3)",
             rusqlite::params![folder.id, folder.name, folder.created_at],
         )
         .map_err(|e| e.to_string())?;
     }
-    for note in notes {
-        conn.execute(
+    for note in &notes {
+        tx.execute(
             "INSERT OR IGNORE INTO notes (id, folder_id, title, body, created_at, updated_at) VALUES (?1, ?2, ?3, ?4, ?5, ?6)",
             rusqlite::params![note.id, note.folder_id, note.title, note.body, note.created_at, note.updated_at],
         )
         .map_err(|e| e.to_string())?;
     }
+    tx.commit().map_err(|e| e.to_string())?;
     Ok(())
 }
 

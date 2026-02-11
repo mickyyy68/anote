@@ -6,6 +6,7 @@
   display: flex;
   flex-direction: column;
   transition: width 0.25s ease, min-width 0.25s ease, background var(--transition-speed), border-color var(--transition-speed);
+  will-change: width, min-width;
   position: relative;
   overflow: hidden;
 }
@@ -49,7 +50,7 @@
   align-items: center;
   justify-content: center;
   color: var(--text-tertiary);
-  transition: all 0.2s;
+  transition: background 0.2s, color 0.2s;
 }
 
 .theme-toggle:hover {
@@ -94,7 +95,7 @@
   align-items: center;
   justify-content: center;
   color: var(--text-tertiary);
-  transition: all 0.2s;
+  transition: background 0.2s, color 0.2s;
 }
 
 .add-folder-btn:hover {
@@ -121,10 +122,9 @@
   padding: 8px 10px;
   border-radius: 8px;
   cursor: pointer;
-  transition: all 0.15s;
+  transition: background 0.15s;
   position: relative;
   user-select: none;
-  animation: slideIn 0.2s ease both;
 }
 
 .folder-item:hover {
@@ -155,7 +155,7 @@
   background: var(--folder-icon-bg);
   color: var(--text-tertiary);
   flex-shrink: 0;
-  transition: all 0.15s;
+  transition: background 0.15s, color 0.15s;
 }
 
 .folder-icon svg {
@@ -214,7 +214,7 @@
   align-items: center;
   justify-content: center;
   color: var(--text-tertiary);
-  transition: all 0.15s;
+  transition: background 0.15s, color 0.15s;
 }
 
 .folder-action-btn:hover {
@@ -274,7 +274,6 @@
 }
 
 .sidebar-footer p {
-  font-size: 11px;
   color: var(--text-tertiary);
   font-style: italic;
   font-family: 'Instrument Serif', serif;
