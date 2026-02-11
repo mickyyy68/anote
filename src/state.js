@@ -16,13 +16,14 @@ export const DataLayer = {
   async load() {
     try {
       const folders = await invoke('get_folders');
-      const notes = await invoke('get_notes_all');
+      const notes = await invoke('get_notes_metadata');
       state.data.folders = folders.map(f => ({
         id: f.id, name: f.name, createdAt: f.created_at
       }));
       state.data.notes = notes.map(n => ({
         id: n.id, folderId: n.folder_id, title: n.title,
-        body: n.body, createdAt: n.created_at, updatedAt: n.updated_at
+        preview: n.preview, body: null,
+        createdAt: n.created_at, updatedAt: n.updated_at
       }));
     } catch (e) {
       console.error('Failed to load data:', e);

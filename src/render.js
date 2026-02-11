@@ -159,7 +159,7 @@ function renderNotesList() {
            onclick="selectNote('${note.id}')"
            data-note-id="${note.id}">
         <div class="note-card-title">${escapeHtml(note.title || 'Untitled')}</div>
-        <div class="note-card-preview">${escapeHtml(stripMarkdown(note.body).slice(0, 80) || 'Empty note')}</div>
+        <div class="note-card-preview">${escapeHtml(stripMarkdown(note.preview || '').slice(0, 80) || 'Empty note')}</div>
         <div class="note-card-date">${formatDate(note.updatedAt)}</div>
         <button class="note-card-delete" onclick="event.stopPropagation(); deleteNote('${note.id}')" title="Delete note">
           ${icons.x}
@@ -190,6 +190,13 @@ async function renderEditorPanel(focusTitle) {
   }
 
   currentEditorNoteId = activeNote.id;
+
+  // Load body on demand if not yet loaded
+  if (activeNote.body === null) {
+    activeNote.body = await invoke('get_note_body', { id: activeNote.id });
+    // Guard: user may have switched notes during the await
+    if (state.activeNoteId !== activeNote.id) return;
+  }
 
   root.innerHTML = `
     <input class="editor-title-input"
@@ -406,6 +413,7 @@ async function addNote() {
     id: generateId(),
     folderId: state.activeFolderId,
     title: '',
+    preview: '',
     body: '',
     createdAt: Date.now(),
     updatedAt: Date.now(),
@@ -425,18 +433,22 @@ function selectNote(id) {
 }
 
 let saveTimeout;
+function scheduleSave(note) {
+  clearTimeout(saveTimeout);
+  saveTimeout = setTimeout(() => {
+    updateNoteCard(note);
+    invoke('update_note', {
+      id: note.id, title: note.title, body: note.body, updatedAt: note.updatedAt
+    });
+  }, 300);
+}
+
 function updateNoteTitle(id, value) {
   const note = state.data.notes.find(n => n.id === id);
   if (note) {
     note.title = value;
     note.updatedAt = Date.now();
-    clearTimeout(saveTimeout);
-    saveTimeout = setTimeout(() => {
-      updateNoteCard(note);
-      invoke('update_note', {
-        id: note.id, title: note.title, body: note.body, updatedAt: note.updatedAt
-      });
-    }, 300);
+    scheduleSave(note);
   }
 }
 
@@ -444,14 +456,9 @@ function updateNoteBody(id, value) {
   const note = state.data.notes.find(n => n.id === id);
   if (note) {
     note.body = value;
+    note.preview = value.slice(0, 200);
     note.updatedAt = Date.now();
-    clearTimeout(saveTimeout);
-    saveTimeout = setTimeout(() => {
-      updateNoteCard(note);
-      invoke('update_note', {
-        id: note.id, title: note.title, body: note.body, updatedAt: note.updatedAt
-      });
-    }, 300);
+    scheduleSave(note);
   }
 }
 
@@ -462,7 +469,7 @@ function updateNoteCard(note) {
     const previewEl = card.querySelector('.note-card-preview');
     const dateEl = card.querySelector('.note-card-date');
     if (titleEl) titleEl.textContent = note.title || 'Untitled';
-    if (previewEl) previewEl.textContent = stripMarkdown(note.body).slice(0, 80) || 'Empty note';
+    if (previewEl) previewEl.textContent = stripMarkdown(note.preview || '').slice(0, 80) || 'Empty note';
     if (dateEl) dateEl.textContent = formatDate(note.updatedAt);
   }
 }

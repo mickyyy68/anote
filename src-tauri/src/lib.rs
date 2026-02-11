@@ -22,6 +22,16 @@ struct Note {
     updated_at: i64,
 }
 
+#[derive(Serialize, Clone)]
+struct NoteMetadata {
+    id: String,
+    folder_id: String,
+    title: String,
+    preview: String,
+    created_at: i64,
+    updated_at: i64,
+}
+
 fn init_db(conn: &Connection) {
     conn.execute_batch("PRAGMA foreign_keys = ON;").unwrap();
     conn.execute_batch(
@@ -115,6 +125,42 @@ fn delete_folder(db: State<Db>, id: String) -> Result<(), String> {
 }
 
 // ===== Note commands =====
+
+#[tauri::command]
+fn get_notes_metadata(db: State<Db>) -> Result<Vec<NoteMetadata>, String> {
+    let conn = db.0.lock().map_err(|e| e.to_string())?;
+    let mut stmt = conn
+        .prepare("SELECT id, folder_id, title, substr(body, 1, 200), created_at, updated_at FROM notes ORDER BY updated_at DESC")
+        .map_err(|e| e.to_string())?;
+    let notes = stmt
+        .query_map([], |row| {
+            Ok(NoteMetadata {
+                id: row.get(0)?,
+                folder_id: row.get(1)?,
+                title: row.get(2)?,
+                preview: row.get(3)?,
+                created_at: row.get(4)?,
+                updated_at: row.get(5)?,
+            })
+        })
+        .map_err(|e| e.to_string())?
+        .collect::<Result<Vec<_>, _>>()
+        .map_err(|e| e.to_string())?;
+    Ok(notes)
+}
+
+#[tauri::command]
+fn get_note_body(db: State<Db>, id: String) -> Result<String, String> {
+    let conn = db.0.lock().map_err(|e| e.to_string())?;
+    let body: String = conn
+        .query_row(
+            "SELECT body FROM notes WHERE id = ?1",
+            rusqlite::params![id],
+            |row| row.get(0),
+        )
+        .map_err(|e| e.to_string())?;
+    Ok(body)
+}
 
 #[tauri::command]
 fn get_notes_all(db: State<Db>) -> Result<Vec<Note>, String> {
@@ -233,6 +279,8 @@ pub fn run() {
             create_folder,
             rename_folder,
             delete_folder,
+            get_notes_metadata,
+            get_note_body,
             get_notes_all,
             create_note,
             update_note,
