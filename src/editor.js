@@ -34,16 +34,13 @@ export async function createEditor(container, markdown, onChange) {
 
   crepe.on((api) => {
     api.markdownUpdated((_ctx, md, _prevMd) => {
-      // Guard against firing onChange on initial content load
-      if (initialLoad) {
-        initialLoad = false;
-        return;
-      }
+      if (initialLoad) return;
       onChange(md);
     });
   });
 
   await crepe.create();
+  initialLoad = false;
 
   // Race condition guard after async create
   if (currentSeq !== sequenceId) {
