@@ -99,6 +99,9 @@ function renderSidebar() {
 
     <div class="sidebar-footer">
       <p>Write something worth keeping.</p>
+      <button class="settings-btn" onclick="openSettingsModal()" title="Settings">
+        ${icons.gear}
+      </button>
     </div>
   `;
 
@@ -492,6 +495,68 @@ async function deleteNote(id) {
   await invoke('delete_note', { id });
 }
 
+// ===== SETTINGS MODAL =====
+function renderSettingsModal() {
+  const existing = document.getElementById('settings-modal-overlay');
+  if (existing) existing.remove();
+
+  if (!state.settingsModalOpen) return;
+
+  const overlay = document.createElement('div');
+  overlay.id = 'settings-modal-overlay';
+  overlay.className = 'modal-overlay';
+  overlay.onclick = () => closeSettingsModal();
+  overlay.innerHTML = `
+    <div class="modal-content" onclick="event.stopPropagation()">
+      <div class="modal-header">
+        <h2>Settings</h2>
+        <button class="modal-close-btn" onclick="closeSettingsModal()">${icons.x}</button>
+      </div>
+      <div class="modal-body">
+        <div class="settings-section">
+          <div class="settings-section-header">
+            <h3>Backup</h3>
+            <p>Export all your folders and notes as a JSON file to <code>~/.anote/backups/</code></p>
+          </div>
+          <button class="settings-action-btn" onclick="exportBackup()">
+            ${icons.download}
+            <span>Export Backup</span>
+          </button>
+          <div class="backup-status" id="backup-status"></div>
+        </div>
+      </div>
+    </div>
+  `;
+  document.body.appendChild(overlay);
+}
+
+function openSettingsModal() {
+  state.settingsModalOpen = true;
+  renderSettingsModal();
+}
+
+function closeSettingsModal() {
+  state.settingsModalOpen = false;
+  renderSettingsModal();
+}
+
+async function exportBackup() {
+  const statusEl = document.getElementById('backup-status');
+  if (!statusEl) return;
+
+  statusEl.className = 'backup-status loading';
+  statusEl.textContent = 'Exporting...';
+
+  try {
+    const filePath = await invoke('export_backup');
+    statusEl.className = 'backup-status success';
+    statusEl.textContent = `Saved to ${filePath}`;
+  } catch (e) {
+    statusEl.className = 'backup-status error';
+    statusEl.textContent = `Export failed: ${e}`;
+  }
+}
+
 // ===== GLOBAL EVENT LISTENERS =====
 document.addEventListener('click', closeContextMenu);
 document.addEventListener('contextmenu', (e) => {
@@ -508,7 +573,12 @@ document.addEventListener('keydown', (e) => {
     e.preventDefault();
     addFolder();
   }
+  if ((e.metaKey || e.ctrlKey) && e.key === ',') {
+    e.preventDefault();
+    openSettingsModal();
+  }
   if (e.key === 'Escape') {
+    if (state.settingsModalOpen) { closeSettingsModal(); return; }
     closeContextMenu();
   }
 });
@@ -529,3 +599,6 @@ window.selectNote = selectNote;
 window.updateNoteTitle = updateNoteTitle;
 window.updateNoteBody = updateNoteBody;
 window.deleteNote = deleteNote;
+window.openSettingsModal = openSettingsModal;
+window.closeSettingsModal = closeSettingsModal;
+window.exportBackup = exportBackup;

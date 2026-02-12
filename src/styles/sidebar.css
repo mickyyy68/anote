@@ -274,9 +274,32 @@
 }
 
 .sidebar-footer p {
+  flex: 1;
   color: var(--text-tertiary);
   font-style: italic;
   font-family: 'Instrument Serif', serif;
   font-size: 13px;
   letter-spacing: 0.01em;
+}
+
+.settings-btn {
+  width: 28px;
+  height: 28px;
+  border-radius: 7px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  color: var(--text-tertiary);
+  flex-shrink: 0;
+  transition: background 0.2s, color 0.2s;
+}
+
+.settings-btn:hover {
+  background: var(--bg-tertiary);
+  color: var(--text-secondary);
+}
+
+.settings-btn svg {
+  width: 15px;
+  height: 15px;
 }

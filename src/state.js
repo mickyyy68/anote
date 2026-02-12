@@ -10,6 +10,7 @@ export const state = {
   editingFolderId: null,
   contextMenu: null,
   sidebarCollapsed: false,
+  settingsModalOpen: false,
 };
 
 export const DataLayer = {

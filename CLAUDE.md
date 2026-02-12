@@ -50,7 +50,7 @@ src/
   styles/
     theme.css            ← CSS variable definitions (light/dark)
     base.css             ← Reset, body, scrollbar, animations
-    layout.css           ← App layout, context menu, responsive
+    layout.css           ← App layout, context menu, modal, responsive
     sidebar.css          ← Sidebar, folders
     notes.css            ← Notes list, note cards
     editor.css           ← Editor panel, Milkdown theme overrides
@@ -64,7 +64,7 @@ src/
 
 ### Backend (`src-tauri/src/lib.rs`)
 
-SQLite database via `rusqlite` with `Mutex<Connection>` in Tauri managed state. Nine `#[tauri::command]` functions handle CRUD for folders and notes, plus `import_data` for bulk migration.
+SQLite database via `rusqlite` with `Mutex<Connection>` in Tauri managed state. Ten `#[tauri::command]` functions handle CRUD for folders and notes, `import_data` for bulk migration, and `export_backup` for JSON backups to `~/.anote/backups/`.
 
 Database schema includes an FTS5 virtual table (`notes_fts`) with triggers that keep it in sync automatically — ready for future search features but not yet exposed to the frontend.
 
@@ -74,4 +74,4 @@ Tauri auto-converts JS camelCase params to Rust snake_case (e.g., `folderId` →
 
 - `tauri.conf.json`: Vite dev server at `devUrl: "http://localhost:5173"`, `frontendDist: "../dist"` for production
 - `withGlobalTauri: false` — uses `@tauri-apps/api` ES module imports
-- SQLite database stored at Tauri app data dir as `anote.db`
+- SQLite database stored at `~/.anote/anote.db` (auto-migrates from old Tauri app data dir on first run)

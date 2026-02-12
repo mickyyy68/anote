@@ -263,14 +263,88 @@ fn import_data(db: State<Db>, folders: Vec<Folder>, notes: Vec<Note>) -> Result<
     Ok(())
 }
 
+// ===== Backup command =====
+
+#[tauri::command]
+fn export_backup(db: State<Db>) -> Result<String, String> {
+    let conn = db.0.lock().map_err(|e| e.to_string())?;
+
+    // Query all folders
+    let mut folder_stmt = conn
+        .prepare("SELECT id, name, created_at FROM folders ORDER BY created_at")
+        .map_err(|e| e.to_string())?;
+    let folders: Vec<serde_json::Value> = folder_stmt
+        .query_map([], |row| {
+            Ok(serde_json::json!({
+                "id": row.get::<_, String>(0)?,
+                "name": row.get::<_, String>(1)?,
+                "created_at": row.get::<_, i64>(2)?
+            }))
+        })
+        .map_err(|e| e.to_string())?
+        .collect::<Result<Vec<_>, _>>()
+        .map_err(|e| e.to_string())?;
+
+    // Query all notes (full body)
+    let mut note_stmt = conn
+        .prepare("SELECT id, folder_id, title, body, created_at, updated_at FROM notes ORDER BY updated_at DESC")
+        .map_err(|e| e.to_string())?;
+    let notes: Vec<serde_json::Value> = note_stmt
+        .query_map([], |row| {
+            Ok(serde_json::json!({
+                "id": row.get::<_, String>(0)?,
+                "folder_id": row.get::<_, String>(1)?,
+                "title": row.get::<_, String>(2)?,
+                "body": row.get::<_, String>(3)?,
+                "created_at": row.get::<_, i64>(4)?,
+                "updated_at": row.get::<_, i64>(5)?
+            }))
+        })
+        .map_err(|e| e.to_string())?
+        .collect::<Result<Vec<_>, _>>()
+        .map_err(|e| e.to_string())?;
+
+    let now = chrono::Local::now();
+    let backup = serde_json::json!({
+        "version": "1.0",
+        "exportedAt": now.timestamp_millis(),
+        "folders": folders,
+        "notes": notes
+    });
+
+    let json_str = serde_json::to_string_pretty(&backup).map_err(|e| e.to_string())?;
+
+    // Write to ~/.anote/backups/
+    let home = dirs::home_dir().ok_or("failed to get home directory")?;
+    let backups_dir = home.join(".anote").join("backups");
+    std::fs::create_dir_all(&backups_dir).map_err(|e| e.to_string())?;
+
+    let filename = format!("anote-backup-{}.json", now.format("%Y%m%d-%H%M%S"));
+    let file_path = backups_dir.join(&filename);
+    std::fs::write(&file_path, json_str).map_err(|e| e.to_string())?;
+
+    Ok(file_path.to_string_lossy().to_string())
+}
+
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
     tauri::Builder::default()
         .setup(|app| {
-            // Open/create database in app data directory
-            let app_data_dir = app.path().app_data_dir().expect("failed to get app data dir");
-            std::fs::create_dir_all(&app_data_dir).expect("failed to create app data dir");
-            let db_path = app_data_dir.join("anote.db");
+            // Use ~/.anote/ as canonical data directory
+            let home = dirs::home_dir().expect("failed to get home directory");
+            let anote_dir = home.join(".anote");
+            std::fs::create_dir_all(&anote_dir).expect("failed to create ~/.anote/");
+            let db_path = anote_dir.join("anote.db");
+
+            // Migrate from old Tauri app data path if needed
+            if !db_path.exists() {
+                if let Ok(app_data_dir) = app.path().app_data_dir() {
+                    let old_db = app_data_dir.join("anote.db");
+                    if old_db.exists() {
+                        let _ = std::fs::copy(&old_db, &db_path);
+                    }
+                }
+            }
 
             let conn = Connection::open(&db_path).expect("failed to open database");
             init_db(&conn);
@@ -298,6 +372,7 @@ pub fn run() {
             update_note,
             delete_note,
             import_data,
+            export_backup,
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");
