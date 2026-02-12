@@ -121,27 +121,31 @@
 /* Heading styles within editor */
 .editor-body .milkdown .ProseMirror h1 {
   font-family: 'Instrument Serif', serif;
-  font-size: 24px;
+  font-size: 34px;
+  line-height: 1.18;
   font-weight: 400;
   letter-spacing: -0.02em;
-  margin-top: 24px;
-  margin-bottom: 8px;
+  margin-top: 30px;
+  margin-bottom: 10px;
 }
 
 .editor-body .milkdown .ProseMirror h2 {
   font-family: 'Instrument Serif', serif;
-  font-size: 20px;
+  font-size: 28px;
+  line-height: 1.24;
   font-weight: 400;
   letter-spacing: -0.01em;
-  margin-top: 20px;
-  margin-bottom: 6px;
+  margin-top: 24px;
+  margin-bottom: 8px;
 }
 
 .editor-body .milkdown .ProseMirror h3 {
-  font-size: 16px;
+  font-size: 22px;
+  line-height: 1.32;
+  font-family: 'Instrument Serif', serif;
   font-weight: 500;
-  margin-top: 16px;
-  margin-bottom: 4px;
+  margin-top: 20px;
+  margin-bottom: 6px;
 }
 
 /* Code block background */
