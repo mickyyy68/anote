@@ -1,0 +1,14 @@
+{
+  "name": "anote-tests",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "perf": "bun run perf:run-suite",
+    "perf:run-suite": "bun run ./perf/run-suite.mjs",
+    "perf:ui": "bun run ./perf/run-ui-workload.mjs",
+    "perf:sample": "bash perf/sample-process.sh --out perf/outputs/sample-process.csv --match ms-playwright/chromium"
+  },
+  "devDependencies": {
+    "playwright": "^1.51.0"
+  }
+}

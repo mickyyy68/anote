@@ -1,0 +1,21 @@
+{
+  "version": 1,
+  "description": "Optional fixture metadata for future DB seeding scripts.",
+  "profiles": {
+    "small": {
+      "folders": 3,
+      "notesPerFolder": 30,
+      "bodyBytes": 1200
+    },
+    "medium": {
+      "folders": 8,
+      "notesPerFolder": 300,
+      "bodyBytes": 2000
+    },
+    "large": {
+      "folders": 20,
+      "notesPerFolder": 2000,
+      "bodyBytes": 4000
+    }
+  }
+}

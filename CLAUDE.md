@@ -18,7 +18,28 @@ cd src-tauri && cargo check    # Type-check without building
 cd src-tauri && cargo build    # Full debug build
 ```
 
-No tests or linting are configured.
+No unit/integration test framework or linting is configured.
+A performance harness is configured under `tests/`.
+
+## Performance Test Harness
+
+Resource/performance automation lives under `tests/` and is intentionally isolated from app runtime code.
+
+```bash
+bun run test:perf      # Full suite (Playwright UI workload + process sampling)
+bun run test:perf:ui   # UI workload only
+```
+
+Notes:
+- The harness runs in browser mode (not Tauri window automation).
+- It injects a test-only Tauri IPC mock so existing `invoke(...)`-based app actions can run unchanged.
+- CLI output includes a concise human-readable run summary and artifact paths.
+
+Setup once:
+```bash
+bun --cwd tests install
+bunx playwright install chromium
+```
 
 ## Dependencies
 
