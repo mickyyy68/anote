@@ -165,6 +165,7 @@ function renderCommandPalette({ focusInput = false } = {}) {
         ` : results.map((result, index) => `
           <button
             class="command-result-item ${index === state.commandSelectedIndex ? 'active' : ''}"
+            data-command-index="${index}"
             onclick="selectCommandResult(${index})">
             <div class="command-result-text">
               <div class="command-result-title">${escapeHtml(result.title)}</div>
@@ -227,12 +228,24 @@ function getActiveResults() {
   return query && cachedFtsResults !== null ? cachedFtsResults : getCommandResults();
 }
 
+function updateCommandSelectionUI(prevIndex, nextIndex) {
+  const overlay = document.getElementById('command-palette-overlay');
+  if (!overlay) return;
+  const prevEl = overlay.querySelector(`.command-result-item[data-command-index="${prevIndex}"]`);
+  if (prevEl) prevEl.classList.remove('active');
+  const nextEl = overlay.querySelector(`.command-result-item[data-command-index="${nextIndex}"]`);
+  if (!nextEl) return;
+  nextEl.classList.add('active');
+  nextEl.scrollIntoView({ block: 'nearest' });
+}
+
 function moveCommandSelection(delta) {
   const results = getActiveResults();
   if (results.length === 0) return;
   const len = results.length;
-  state.commandSelectedIndex = (state.commandSelectedIndex + delta + len) % len;
-  renderCommandPalette({ focusInput: true });
+  const prevIndex = state.commandSelectedIndex;
+  state.commandSelectedIndex = (prevIndex + delta + len) % len;
+  updateCommandSelectionUI(prevIndex, state.commandSelectedIndex);
 }
 
 function selectCommandResult(index) {
