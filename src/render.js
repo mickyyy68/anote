@@ -1,6 +1,6 @@
 import { invoke } from '@tauri-apps/api/core';
 import { icons } from './icons.js';
-import { state, loadTheme, saveTheme, generateId, formatDate, escapeHtml } from './state.js';
+import { state, loadTheme, saveTheme, generateId, formatDate, escapeHtml, rebuildIndexes } from './state.js';
 import { createEditor, destroyEditor, focusEditor } from './editor.js';
 
 // Track which note the editor is currently showing
@@ -8,6 +8,15 @@ let currentEditorNoteId = null;
 // Track whether we need a full rebuild (layout changed) vs partial update
 let currentFolderId = null;
 const MAX_COMMAND_RESULTS = 80;
+
+// Dirty flags — when set, render() updates only the flagged sections.
+// When all are false, render() updates everything (default for backwards compat).
+const dirty = { sidebar: false, notesHeader: false, notesList: false };
+function markAllDirty() { dirty.sidebar = true; dirty.notesHeader = true; dirty.notesList = true; }
+function clearDirty() { dirty.sidebar = false; dirty.notesHeader = false; dirty.notesList = false; }
+function isDirtySet() { return dirty.sidebar || dirty.notesHeader || dirty.notesList; }
+
+const strippedPreviewCache = new Map();
 
 function stripMarkdown(md) {
   return md
@@ -23,6 +32,16 @@ function stripMarkdown(md) {
     .trim();
 }
 
+function getStrippedPreview(raw) {
+  if (!raw) return '';
+  let result = strippedPreviewCache.get(raw);
+  if (result !== undefined) return result;
+  if (strippedPreviewCache.size >= 2000) strippedPreviewCache.clear();
+  result = stripMarkdown(raw);
+  strippedPreviewCache.set(raw, result);
+  return result;
+}
+
 function isMacPlatform() {
   return /mac|iphone|ipad|ipod/i.test(navigator.platform || navigator.userAgent || '');
 }
@@ -35,22 +54,14 @@ function getShortcutHint() {
   return isMacPlatform() ? '⌘K' : 'Ctrl K';
 }
 
-function getFolderNameMap() {
-  const folderNameMap = {};
-  state.data.folders.forEach((folder) => {
-    folderNameMap[folder.id] = folder.name;
-  });
-  return folderNameMap;
-}
-
 function getCommandResults() {
   const query = state.commandQuery.trim().toLowerCase();
-  const folderNameMap = getFolderNameMap();
   const results = state.data.notes
     .map((note) => {
-      const folderName = folderNameMap[note.folderId] || 'Untitled folder';
+      const folder = state.foldersById.get(note.folderId);
+      const folderName = folder ? folder.name : 'Untitled folder';
       const title = note.title || 'Untitled';
-      const preview = stripMarkdown(note.preview || '') || 'Empty note';
+      const preview = getStrippedPreview(note.preview || '') || 'Empty note';
       const titleMatch = title.toLowerCase().includes(query);
       const previewMatch = preview.toLowerCase().includes(query);
       const folderMatch = folderName.toLowerCase().includes(query);
@@ -80,6 +91,39 @@ function getCommandResults() {
   return results.slice(0, MAX_COMMAND_RESULTS);
 }
 
+let ftsSearchTimeout = null;
+let cachedFtsResults = null;
+
+function ftsResultToCommand(n) {
+  const folder = state.foldersById.get(n.folder_id);
+  return {
+    noteId: n.id,
+    folderId: n.folder_id,
+    title: n.title || 'Untitled',
+    preview: getStrippedPreview(n.preview || '') || 'Empty note',
+    folderName: folder ? folder.name : 'Untitled folder',
+    updatedAt: n.updated_at,
+  };
+}
+
+function triggerFtsSearch(query) {
+  if (ftsSearchTimeout) clearTimeout(ftsSearchTimeout);
+  ftsSearchTimeout = setTimeout(async () => {
+    ftsSearchTimeout = null;
+    try {
+      const raw = await invoke('search_notes', { query });
+      // Guard: user may have changed query or closed palette during await
+      if (!state.commandPaletteOpen || state.commandQuery.trim() !== query) return;
+      cachedFtsResults = raw.map(ftsResultToCommand);
+    } catch {
+      // FTS query syntax error (e.g. unmatched quotes) — fall back to JS search
+      cachedFtsResults = null;
+    }
+    state.commandSelectedIndex = 0;
+    renderCommandPalette({ focusInput: true });
+  }, 150);
+}
+
 function focusCommandPaletteInput() {
   const input = document.getElementById('command-palette-input');
   if (!input) return;
@@ -93,7 +137,7 @@ function renderCommandPalette({ focusInput = false } = {}) {
   if (existing) existing.remove();
   if (!state.commandPaletteOpen) return;
 
-  const results = getCommandResults();
+  const results = getActiveResults();
   if (results.length === 0) {
     state.commandSelectedIndex = 0;
   } else if (state.commandSelectedIndex >= results.length || state.commandSelectedIndex < 0) {
@@ -159,17 +203,32 @@ function closeCommandPalette() {
   state.commandPaletteOpen = false;
   state.commandQuery = '';
   state.commandSelectedIndex = 0;
+  cachedFtsResults = null;
+  if (ftsSearchTimeout) { clearTimeout(ftsSearchTimeout); ftsSearchTimeout = null; }
   renderCommandPalette();
 }
 
 function setCommandQuery(value) {
   state.commandQuery = value;
   state.commandSelectedIndex = 0;
+  const query = value.trim();
+  if (query) {
+    cachedFtsResults = null;
+    triggerFtsSearch(query);
+  } else {
+    cachedFtsResults = null;
+    if (ftsSearchTimeout) { clearTimeout(ftsSearchTimeout); ftsSearchTimeout = null; }
+  }
   renderCommandPalette({ focusInput: true });
 }
 
+function getActiveResults() {
+  const query = state.commandQuery.trim();
+  return query && cachedFtsResults !== null ? cachedFtsResults : getCommandResults();
+}
+
 function moveCommandSelection(delta) {
-  const results = getCommandResults();
+  const results = getActiveResults();
   if (results.length === 0) return;
   const len = results.length;
   state.commandSelectedIndex = (state.commandSelectedIndex + delta + len) % len;
@@ -177,7 +236,7 @@ function moveCommandSelection(delta) {
 }
 
 function selectCommandResult(index) {
-  const results = getCommandResults();
+  const results = getActiveResults();
   if (results.length === 0) return;
   const safeIndex = Math.max(0, Math.min(index, results.length - 1));
   const selected = results[safeIndex];
@@ -190,16 +249,17 @@ function selectCommandResult(index) {
 
 // ===== SORT HELPER =====
 function getSortedFolderNotes(folderId) {
-  const notes = state.data.notes.filter(n => n.folderId === folderId);
+  const notes = (state.notesByFolderId.get(folderId) || []).slice();
   if (state.sortMode === 'recent') {
     return notes.sort((a, b) => (b.pinned - a.pinned) || (b.updatedAt - a.updatedAt));
   }
-  // manual mode
   return notes.sort((a, b) => (b.pinned - a.pinned) || (a.sortOrder - b.sortOrder));
 }
 
 // ===== DRAG STATE =====
 let draggedNoteId = null;
+let draggedCardEl = null;
+let prevDropTarget = null;
 
 // ===== RENDER HELPERS =====
 function renderSidebar() {
@@ -238,10 +298,8 @@ function renderSidebar() {
       ` : `
         <ul class="folder-list">
           ${(() => {
-            const countMap = {};
-            data.notes.forEach(n => { countMap[n.folderId] = (countMap[n.folderId] || 0) + 1; });
             return data.folders.map((folder, i) => {
-            const count = countMap[folder.id] || 0;
+            const count = state.notesCountByFolder.get(folder.id) || 0;
             const isEditing = editingFolderId === folder.id;
             return `
               <li class="folder-item ${activeFolderId === folder.id ? 'active' : ''}"
@@ -297,8 +355,8 @@ function renderSidebar() {
 function renderNotesHeader() {
   const root = document.getElementById('notes-header-root');
   if (!root) return;
-  const { data, activeFolderId } = state;
-  const activeFolder = data.folders.find(f => f.id === activeFolderId);
+  const { activeFolderId } = state;
+  const activeFolder = state.foldersById.get(activeFolderId);
   const expandBtn = state.sidebarCollapsed ? `
     <button class="sidebar-expand-btn" onclick="toggleSidebar()" title="Show sidebar">
       ${icons.panelLeft}
@@ -382,7 +440,7 @@ function renderNotesList() {
            ${dragAttrs}>
         ${note.pinned ? `<div class="note-card-pin-indicator">${icons.pin}</div>` : ''}
         <div class="note-card-title">${escapeHtml(note.title || 'Untitled')}</div>
-        <div class="note-card-preview">${escapeHtml(stripMarkdown(note.preview || '').slice(0, 80) || 'Empty note')}</div>
+        <div class="note-card-preview">${escapeHtml(getStrippedPreview(note.preview || '').slice(0, 80) || 'Empty note')}</div>
         <div class="note-card-date">${formatDate(note.updatedAt)}</div>
         <button class="note-card-pin" onclick="event.stopPropagation(); togglePinNote('${note.id}')" title="${note.pinned ? 'Unpin' : 'Pin to top'}">
           ${icons.pin}
@@ -400,7 +458,7 @@ async function renderEditorPanel(focusTitle) {
   const root = document.getElementById('editor-panel-root');
   if (!root) return;
   const { activeNoteId } = state;
-  const activeNote = state.data.notes.find(n => n.id === activeNoteId);
+  const activeNote = state.notesById.get(activeNoteId);
 
   // Destroy old editor
   await destroyEditor();
@@ -501,18 +559,21 @@ export async function render(options = {}) {
     currentFolderId = activeFolderId;
   }
 
-  // Always update sidebar and notes list (safe innerHTML rebuilds)
-  renderSidebar();
+  const selective = isDirtySet();
+
+  if (!selective || dirty.sidebar) renderSidebar();
 
   if (activeFolderId) {
-    renderNotesHeader();
-    renderNotesList();
+    if (!selective || dirty.notesHeader) renderNotesHeader();
+    if (!selective || dirty.notesList) renderNotesList();
 
     // Only rebuild editor when active note changes
     if (currentEditorNoteId !== activeNoteId) {
       await renderEditorPanel(options.focusTitle);
     }
   }
+
+  clearDirty();
 }
 
 // ===== THEME =====
@@ -520,6 +581,7 @@ function toggleTheme() {
   const current = loadTheme();
   const next = current === 'light' ? 'dark' : 'light';
   saveTheme(next);
+  dirty.sidebar = true;
   render();
 }
 
@@ -539,6 +601,9 @@ async function addFolder() {
     createdAt: Date.now(),
   };
   state.data.folders.push(folder);
+  state.foldersById.set(folder.id, folder);
+  state.notesByFolderId.set(folder.id, []);
+  state.notesCountByFolder.set(folder.id, 0);
   state.activeFolderId = folder.id;
   state.activeNoteId = null;
   state.editingFolderId = folder.id;
@@ -550,6 +615,7 @@ async function addFolder() {
 
 function selectFolder(id) {
   if (state.editingFolderId) return;
+  flushPendingSaves();
   state.activeFolderId = id;
   state.activeNoteId = null;
   // Auto-select first note
@@ -562,16 +628,19 @@ function selectFolder(id) {
 
 function startEditingFolder(id) {
   state.editingFolderId = id;
+  dirty.sidebar = true;
   render();
 }
 
 async function finishEditingFolder(id, value) {
-  const folder = state.data.folders.find(f => f.id === id);
+  const folder = state.foldersById.get(id);
   const newName = value.trim() || 'Untitled folder';
   if (folder) {
     folder.name = newName;
   }
   state.editingFolderId = null;
+  dirty.sidebar = true;
+  dirty.notesHeader = true;
   render();
   await invoke('rename_folder', { id, name: newName });
 }
@@ -581,13 +650,19 @@ function handleFolderKeydown(e, id, value) {
     e.target.blur();
   } else if (e.key === 'Escape') {
     state.editingFolderId = null;
+    dirty.sidebar = true;
     render();
   }
 }
 
 async function deleteFolder(id) {
+  const folderNotes = state.notesByFolderId.get(id) || [];
+  for (const n of folderNotes) state.notesById.delete(n.id);
   state.data.folders = state.data.folders.filter(f => f.id !== id);
   state.data.notes = state.data.notes.filter(n => n.folderId !== id);
+  state.foldersById.delete(id);
+  state.notesByFolderId.delete(id);
+  state.notesCountByFolder.delete(id);
   if (state.activeFolderId === id) {
     state.activeFolderId = null;
     state.activeNoteId = null;
@@ -649,7 +724,13 @@ async function addNote() {
     sortOrder: 0,
   };
   state.data.notes.push(note);
+  state.notesById.set(note.id, note);
+  const folderList = state.notesByFolderId.get(note.folderId);
+  if (folderList) folderList.push(note);
+  state.notesCountByFolder.set(note.folderId, (state.notesCountByFolder.get(note.folderId) || 0) + 1);
   state.activeNoteId = note.id;
+  dirty.sidebar = true;
+  dirty.notesList = true;
   await render({ focusTitle: true });
   invoke('create_note', {
     id: note.id, folderId: note.folderId, title: note.title,
@@ -660,6 +741,7 @@ async function addNote() {
 }
 
 function selectNote(id) {
+  flushPendingSaves();
   const prevId = state.activeNoteId;
   state.activeNoteId = id;
 
@@ -675,19 +757,43 @@ function selectNote(id) {
   renderEditorPanel();
 }
 
-let saveTimeout;
+const saveTimeouts = new Map();
+const lastSaved = new Map();
+
+function persistNote(note) {
+  const key = note.id;
+  const prev = lastSaved.get(key);
+  if (prev && prev.title === note.title && prev.body === note.body) return;
+  lastSaved.set(key, { title: note.title, body: note.body });
+  invoke('update_note', {
+    id: note.id, title: note.title, body: note.body, updatedAt: note.updatedAt
+  });
+}
+
 function scheduleSave(note) {
-  clearTimeout(saveTimeout);
-  saveTimeout = setTimeout(() => {
+  const existing = saveTimeouts.get(note.id);
+  if (existing) clearTimeout(existing);
+  saveTimeouts.set(note.id, setTimeout(() => {
+    saveTimeouts.delete(note.id);
     updateNoteCard(note);
-    invoke('update_note', {
-      id: note.id, title: note.title, body: note.body, updatedAt: note.updatedAt
-    });
-  }, 300);
+    persistNote(note);
+  }, 300));
+}
+
+function flushPendingSaves() {
+  for (const [id, timeout] of saveTimeouts) {
+    clearTimeout(timeout);
+    const note = state.notesById.get(id);
+    if (note) {
+      updateNoteCard(note);
+      persistNote(note);
+    }
+  }
+  saveTimeouts.clear();
 }
 
 function updateNoteTitle(id, value) {
-  const note = state.data.notes.find(n => n.id === id);
+  const note = state.notesById.get(id);
   if (note) {
     note.title = value;
     note.updatedAt = Date.now();
@@ -696,7 +802,7 @@ function updateNoteTitle(id, value) {
 }
 
 function updateNoteBody(id, value) {
-  const note = state.data.notes.find(n => n.id === id);
+  const note = state.notesById.get(id);
   if (note) {
     note.body = value;
     note.preview = value.slice(0, 200);
@@ -712,17 +818,30 @@ function updateNoteCard(note) {
     const previewEl = card.querySelector('.note-card-preview');
     const dateEl = card.querySelector('.note-card-date');
     if (titleEl) titleEl.textContent = note.title || 'Untitled';
-    if (previewEl) previewEl.textContent = stripMarkdown(note.preview || '').slice(0, 80) || 'Empty note';
+    if (previewEl) previewEl.textContent = getStrippedPreview(note.preview || '').slice(0, 80) || 'Empty note';
     if (dateEl) dateEl.textContent = formatDate(note.updatedAt);
   }
 }
 
 async function deleteNote(id) {
+  const note = state.notesById.get(id);
   state.data.notes = state.data.notes.filter(n => n.id !== id);
+  if (note) {
+    state.notesById.delete(id);
+    const list = state.notesByFolderId.get(note.folderId);
+    if (list) {
+      const idx = list.indexOf(note);
+      if (idx !== -1) list.splice(idx, 1);
+    }
+    const prev = state.notesCountByFolder.get(note.folderId) || 0;
+    if (prev > 0) state.notesCountByFolder.set(note.folderId, prev - 1);
+  }
   if (state.activeNoteId === id) {
     const folderNotes = getSortedFolderNotes(state.activeFolderId);
     state.activeNoteId = folderNotes.length > 0 ? folderNotes[0].id : null;
   }
+  dirty.sidebar = true;
+  dirty.notesList = true;
   render();
   await invoke('delete_note', { id });
 }
@@ -730,26 +849,30 @@ async function deleteNote(id) {
 // ===== DRAG-AND-DROP =====
 function onNoteDragStart(e, id) {
   draggedNoteId = id;
+  draggedCardEl = e.currentTarget;
+  prevDropTarget = null;
   e.dataTransfer.effectAllowed = 'move';
   e.dataTransfer.setData('text/plain', id);
-  const card = e.currentTarget;
-  if (card) requestAnimationFrame(() => card.classList.add('dragging'));
+  if (draggedCardEl) requestAnimationFrame(() => draggedCardEl.classList.add('dragging'));
 }
 
 function onNoteDragOver(e, targetId) {
   e.preventDefault();
   e.dataTransfer.dropEffect = 'move';
   if (!draggedNoteId || draggedNoteId === targetId) return;
-  const draggedNote = state.data.notes.find(n => n.id === draggedNoteId);
-  const targetNote = state.data.notes.find(n => n.id === targetId);
+  const draggedNote = state.notesById.get(draggedNoteId);
+  const targetNote = state.notesById.get(targetId);
   if (!draggedNote || !targetNote) return;
   // Reject cross-group drops
   if (!!draggedNote.pinned !== !!targetNote.pinned) return;
 
   const card = e.currentTarget;
   if (!card) return;
-  // Clear existing indicators on all cards
-  document.querySelectorAll('.note-card').forEach(c => c.classList.remove('drop-above', 'drop-below'));
+  if (prevDropTarget && prevDropTarget !== card) {
+    prevDropTarget.classList.remove('drop-above', 'drop-below');
+  }
+  prevDropTarget = card;
+  card.classList.remove('drop-above', 'drop-below');
   const rect = card.getBoundingClientRect();
   const midY = rect.top + rect.height / 2;
   if (e.clientY < midY) {
@@ -766,18 +889,23 @@ function onNoteDragLeave(e) {
   }
 }
 
+function clearDragClasses() {
+  if (draggedCardEl) { draggedCardEl.classList.remove('dragging'); draggedCardEl = null; }
+  if (prevDropTarget) { prevDropTarget.classList.remove('drop-above', 'drop-below'); prevDropTarget = null; }
+}
+
 function applyManualReorder(orderedNotes) {
   orderedNotes.forEach((n, i) => { n.sortOrder = i; });
   draggedNoteId = null;
-  document.querySelectorAll('.note-card').forEach(c => c.classList.remove('dragging', 'drop-above', 'drop-below'));
+  clearDragClasses();
   renderNotesList();
   invoke('reorder_notes', { updates: orderedNotes.map(n => [n.id, n.sortOrder]) });
 }
 
 function reorderByTarget(dragId, targetId, placement = 'above') {
   if (!dragId || dragId === targetId) return;
-  const draggedNote = state.data.notes.find(n => n.id === dragId);
-  const targetNote = state.data.notes.find(n => n.id === targetId);
+  const draggedNote = state.notesById.get(dragId);
+  const targetNote = state.notesById.get(targetId);
   if (!draggedNote || !targetNote) return;
   if (!!draggedNote.pinned !== !!targetNote.pinned) return;
 
@@ -816,7 +944,7 @@ function onNotesListDrop(e) {
   if (!draggedNoteId) return;
   if (e.target.closest('.note-card')) return;
 
-  const draggedNote = state.data.notes.find(n => n.id === draggedNoteId);
+  const draggedNote = state.notesById.get(draggedNoteId);
   if (!draggedNote) return;
 
   const isPinned = !!draggedNote.pinned;
@@ -828,7 +956,7 @@ function onNotesListDrop(e) {
 
 function onNoteDragEnd() {
   draggedNoteId = null;
-  document.querySelectorAll('.note-card').forEach(c => c.classList.remove('dragging', 'drop-above', 'drop-below'));
+  clearDragClasses();
 }
 
 // ===== SORT & PIN =====
@@ -839,7 +967,7 @@ function toggleSortMode() {
 }
 
 async function togglePinNote(id) {
-  const note = state.data.notes.find(n => n.id === id);
+  const note = state.notesById.get(id);
   if (!note) return;
   note.pinned = note.pinned ? 0 : 1;
   // Move to top of its new group
@@ -867,7 +995,7 @@ function showNoteContextMenu(e, noteId) {
   e.stopPropagation();
   closeContextMenu();
 
-  const note = state.data.notes.find(n => n.id === noteId);
+  const note = state.notesById.get(noteId);
   if (!note) return;
 
   const pinLabel = note.pinned ? 'Unpin' : 'Pin to top';
@@ -956,6 +1084,7 @@ async function exportBackup() {
 }
 
 // ===== GLOBAL EVENT LISTENERS =====
+window.addEventListener('beforeunload', flushPendingSaves);
 document.addEventListener('click', closeContextMenu);
 document.addEventListener('contextmenu', (e) => {
   if (!e.target.closest('.folder-item') && !e.target.closest('.note-card')) closeContextMenu();

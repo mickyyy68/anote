@@ -89,30 +89,51 @@ fn init_db(conn: &Connection) {
     )
     .unwrap();
 
-    // Migration: add pinned and sort_order columns.
-    // Keep migrations independent so partial schema upgrades can recover.
-    let _ = conn.execute(
-        "ALTER TABLE notes ADD COLUMN pinned INTEGER NOT NULL DEFAULT 0",
-        [],
-    );
-    if conn
-        .execute(
-            "ALTER TABLE notes ADD COLUMN sort_order INTEGER NOT NULL DEFAULT 0",
-            [],
-        )
-        .is_ok()
-    {
-        // Initialize sort_order from updated_at so existing notes keep their visual order
-        let _ = conn.execute_batch(
-            "
-            WITH ranked AS (
-                SELECT id, ROW_NUMBER() OVER (PARTITION BY folder_id ORDER BY updated_at DESC) - 1 AS rn
-                FROM notes
+    // Versioned migrations using PRAGMA user_version
+    let version: i32 = conn
+        .pragma_query_value(None, "user_version", |r| r.get(0))
+        .unwrap_or(0);
+
+    if version < 1 {
+        // Add pinned and sort_order columns (skip if already present from old migration path)
+        let has_pinned: bool = conn
+            .prepare("SELECT pinned FROM notes LIMIT 0")
+            .is_ok();
+        if !has_pinned {
+            conn.execute(
+                "ALTER TABLE notes ADD COLUMN pinned INTEGER NOT NULL DEFAULT 0",
+                [],
             )
-            UPDATE notes SET sort_order = (SELECT rn FROM ranked WHERE ranked.id = notes.id)
-            ",
-        );
+            .unwrap();
+        }
+        let added_sort_order = if conn
+            .prepare("SELECT sort_order FROM notes LIMIT 0")
+            .is_err()
+        {
+            conn.execute(
+                "ALTER TABLE notes ADD COLUMN sort_order INTEGER NOT NULL DEFAULT 0",
+                [],
+            )
+            .unwrap();
+            true
+        } else {
+            false
+        };
+        if added_sort_order {
+            // Initialize sort_order from updated_at so existing notes keep their visual order
+            let _ = conn.execute_batch(
+                "
+                WITH ranked AS (
+                    SELECT id, ROW_NUMBER() OVER (PARTITION BY folder_id ORDER BY updated_at DESC) - 1 AS rn
+                    FROM notes
+                )
+                UPDATE notes SET sort_order = (SELECT rn FROM ranked WHERE ranked.id = notes.id)
+                ",
+            );
+        }
+        conn.pragma_update(None, "user_version", 1).unwrap();
     }
+    // Future migrations: if version < 2 { ... conn.pragma_update(None, "user_version", 2).unwrap(); }
 }
 
 // ===== Folder commands =====
@@ -233,6 +254,40 @@ fn get_notes_all(db: State<Db>) -> Result<Vec<Note>, String> {
 }
 
 #[tauri::command]
+fn search_notes(db: State<Db>, query: String) -> Result<Vec<NoteMetadata>, String> {
+    let conn = db.0.lock().map_err(|e| e.to_string())?;
+    // FTS5 MATCH query, joined back to notes for full metadata
+    let mut stmt = conn
+        .prepare(
+            "SELECT n.id, n.folder_id, n.title, substr(n.body, 1, 200), \
+             n.created_at, n.updated_at, n.pinned, n.sort_order \
+             FROM notes_fts f \
+             JOIN notes n ON n.rowid = f.rowid \
+             WHERE notes_fts MATCH ?1 \
+             ORDER BY rank \
+             LIMIT 80",
+        )
+        .map_err(|e| e.to_string())?;
+    let notes = stmt
+        .query_map(rusqlite::params![query], |row| {
+            Ok(NoteMetadata {
+                id: row.get(0)?,
+                folder_id: row.get(1)?,
+                title: row.get(2)?,
+                preview: row.get(3)?,
+                created_at: row.get(4)?,
+                updated_at: row.get(5)?,
+                pinned: row.get(6)?,
+                sort_order: row.get(7)?,
+            })
+        })
+        .map_err(|e| e.to_string())?
+        .collect::<Result<Vec<_>, _>>()
+        .map_err(|e| e.to_string())?;
+    Ok(notes)
+}
+
+#[tauri::command]
 fn create_note(
     db: State<Db>,
     id: String,
@@ -293,16 +348,27 @@ fn toggle_note_pinned(db: State<Db>, id: String, pinned: i32) -> Result<(), Stri
 
 #[tauri::command]
 fn reorder_notes(db: State<Db>, updates: Vec<(String, i32)>) -> Result<(), String> {
-    let mut conn = db.0.lock().map_err(|e| e.to_string())?;
-    let tx = conn.transaction().map_err(|e| e.to_string())?;
-    for (id, sort_order) in &updates {
-        tx.execute(
-            "UPDATE notes SET sort_order = ?1 WHERE id = ?2",
-            rusqlite::params![sort_order, id],
-        )
-        .map_err(|e| e.to_string())?;
+    if updates.is_empty() {
+        return Ok(());
     }
-    tx.commit().map_err(|e| e.to_string())?;
+    // IDs are app-generated alphanumeric (base36), validate to be safe
+    for (id, _) in &updates {
+        if !id.chars().all(|c| c.is_alphanumeric()) {
+            return Err("invalid note id".to_string());
+        }
+    }
+    let case_clauses: Vec<String> = updates
+        .iter()
+        .map(|(id, order)| format!("WHEN '{}' THEN {}", id, order))
+        .collect();
+    let ids: Vec<String> = updates.iter().map(|(id, _)| format!("'{}'", id)).collect();
+    let sql = format!(
+        "UPDATE notes SET sort_order = CASE id {} END WHERE id IN ({})",
+        case_clauses.join(" "),
+        ids.join(",")
+    );
+    let conn = db.0.lock().map_err(|e| e.to_string())?;
+    conn.execute(&sql, []).map_err(|e| e.to_string())?;
     Ok(())
 }
 
@@ -437,6 +503,7 @@ pub fn run() {
             get_notes_metadata,
             get_note_body,
             get_notes_all,
+            search_notes,
             create_note,
             update_note,
             delete_note,

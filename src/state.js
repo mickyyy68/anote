@@ -15,7 +15,30 @@ export const state = {
   commandPaletteOpen: false,
   commandQuery: '',
   commandSelectedIndex: 0,
+  // In-memory indexes for O(1) lookups
+  notesById: new Map(),
+  foldersById: new Map(),
+  notesByFolderId: new Map(),
+  notesCountByFolder: new Map(),
 };
+
+export function rebuildIndexes() {
+  state.notesById.clear();
+  state.foldersById.clear();
+  state.notesByFolderId.clear();
+  state.notesCountByFolder.clear();
+  for (const f of state.data.folders) {
+    state.foldersById.set(f.id, f);
+    state.notesByFolderId.set(f.id, []);
+    state.notesCountByFolder.set(f.id, 0);
+  }
+  for (const n of state.data.notes) {
+    state.notesById.set(n.id, n);
+    const list = state.notesByFolderId.get(n.folderId);
+    if (list) list.push(n);
+    state.notesCountByFolder.set(n.folderId, (state.notesCountByFolder.get(n.folderId) || 0) + 1);
+  }
+}
 
 export const DataLayer = {
   async load() {
@@ -31,9 +54,14 @@ export const DataLayer = {
         createdAt: n.created_at, updatedAt: n.updated_at,
         pinned: n.pinned || 0, sortOrder: n.sort_order || 0
       }));
+      rebuildIndexes();
     } catch (e) {
       console.error('Failed to load data:', e);
       state.data = { folders: [], notes: [] };
+      state.notesById.clear();
+      state.foldersById.clear();
+      state.notesByFolderId.clear();
+      state.notesCountByFolder.clear();
     }
   },
 };
