@@ -30,7 +30,7 @@ Tauri v2 desktop app: Rust backend + Vite-bundled modular frontend with Milkdown
 
 ### Data Flow
 
-**In-memory state + write-through to SQLite.** The frontend keeps all data in a JS `state.data` object. Reads are synchronous from memory; writes update memory first, call `render()` for instant UI, then fire-and-forget `invoke()` to persist to SQLite. Note edits are debounced (300ms) before persisting.
+**In-memory state + write-through to SQLite.** The frontend keeps all data in a JS `state.data` object (with index Maps for O(1) lookups). Reads are synchronous from memory; writes update memory first, call `render()` for instant UI, then fire-and-forget `invoke()` to persist to SQLite.
 
 ```
 User action → update state.data → render() → invoke('command', params)
@@ -47,7 +47,7 @@ index.html              ← Minimal Vite entry shell
 vite.config.ts          ← Vite config (port 5173, macOS targets)
 src/
   main.js               ← Bootstrap: CSS imports, init()
-  state.js              ← state object, DataLayer, generateId, formatDate, theme utils
+  state.js              ← state object, index Maps, DataLayer, utilities
   render.js             ← Selective render system, all action handlers, window.* exports
   icons.js              ← SVG icon string exports
   editor.js             ← Milkdown Crepe wrapper (createEditor, destroyEditor, getMarkdown)
@@ -60,7 +60,7 @@ src/
     editor.css           ← Editor panel, Milkdown theme overrides
 ```
 
-**Render system:** `render()` is async and uses selective updates. The sidebar and notes list rebuild via `innerHTML` (safe, no persistent state). The editor panel only rebuilds when `activeNoteId` changes, preserving the Milkdown instance during typing. `updateNoteCard()` does targeted DOM patches for the active note's card preview.
+**Render system:** `render()` is async and uses dirty flags to skip unchanged sections. The sidebar and notes list rebuild via `innerHTML` (safe, no persistent state). The editor panel only rebuilds when `activeNoteId` changes, preserving the Milkdown instance during typing. `updateNoteCard()` does targeted DOM patches for the active note's card preview.
 
 **Milkdown editor:** Uses `@milkdown/crepe` (batteries-included package). Supports headings, lists, checkboxes, bold/italic, code blocks, tables, blockquotes, horizontal rules. ImageBlock, Latex, and LinkTooltip features are disabled. The editor wrapper in `editor.js` includes a sequence counter to guard against race conditions during rapid note switching.
 
@@ -68,11 +68,17 @@ src/
 
 ### Backend (`src-tauri/src/lib.rs`)
 
-SQLite database via `rusqlite` with `Mutex<Connection>` in Tauri managed state. Ten `#[tauri::command]` functions handle CRUD for folders and notes, `import_data` for bulk migration, and `export_backup` for JSON backups to `~/.anote/backups/`.
+SQLite database via `rusqlite` with `Mutex<Connection>` in Tauri managed state. `#[tauri::command]` functions handle CRUD for folders and notes, `search_notes` (FTS5), `import_data` for bulk migration, and `export_backup` for JSON backups to `~/.anote/backups/`.
 
-Database schema includes an FTS5 virtual table (`notes_fts`) with triggers that keep it in sync automatically — ready for future search features but not yet exposed to the frontend.
+Database schema includes an FTS5 virtual table (`notes_fts`) with triggers that keep it in sync automatically. The command palette uses `search_notes` for ranked full-text search. Schema migrations use `PRAGMA user_version` — increment the version for each new migration block in `init_db()`.
 
 Tauri auto-converts JS camelCase params to Rust snake_case (e.g., `folderId` → `folder_id`).
+
+### Patterns to Preserve
+
+- **Index Maps:** Use `state.notesById`/`foldersById` for lookups, never `.find()`. Keep Maps in sync at mutation sites or call `rebuildIndexes()`.
+- **Dirty flags:** Set `dirty.sidebar`/`notesHeader`/`notesList` before `render()`. Omit for full-layout changes.
+- **Per-note debounce:** Call `flushPendingSaves()` before switching note, folder, or on app close.
 
 ### Key Config
 
