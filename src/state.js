@@ -12,6 +12,9 @@ export const state = {
   sidebarCollapsed: false,
   settingsModalOpen: false,
   sortMode: 'manual',
+  commandPaletteOpen: false,
+  commandQuery: '',
+  commandSelectedIndex: 0,
 };
 
 export const DataLayer = {

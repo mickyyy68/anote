@@ -7,6 +7,7 @@ import { createEditor, destroyEditor, focusEditor } from './editor.js';
 let currentEditorNoteId = null;
 // Track whether we need a full rebuild (layout changed) vs partial update
 let currentFolderId = null;
+const MAX_COMMAND_RESULTS = 80;
 
 function stripMarkdown(md) {
   return md
@@ -20,6 +21,171 @@ function stripMarkdown(md) {
     .replace(/\|/g, ' ')                              // table pipes
     .replace(/\n+/g, ' ')                             // collapse newlines
     .trim();
+}
+
+function isMacPlatform() {
+  return /mac|iphone|ipad|ipod/i.test(navigator.platform || navigator.userAgent || '');
+}
+
+function getShortcutLabel() {
+  return isMacPlatform() ? 'Cmd+K' : 'Ctrl+K';
+}
+
+function getShortcutHint() {
+  return isMacPlatform() ? '⌘K' : 'Ctrl K';
+}
+
+function getFolderNameMap() {
+  const folderNameMap = {};
+  state.data.folders.forEach((folder) => {
+    folderNameMap[folder.id] = folder.name;
+  });
+  return folderNameMap;
+}
+
+function getCommandResults() {
+  const query = state.commandQuery.trim().toLowerCase();
+  const folderNameMap = getFolderNameMap();
+  const results = state.data.notes
+    .map((note) => {
+      const folderName = folderNameMap[note.folderId] || 'Untitled folder';
+      const title = note.title || 'Untitled';
+      const preview = stripMarkdown(note.preview || '') || 'Empty note';
+      const titleMatch = title.toLowerCase().includes(query);
+      const previewMatch = preview.toLowerCase().includes(query);
+      const folderMatch = folderName.toLowerCase().includes(query);
+      const matches = !query || titleMatch || previewMatch || folderMatch;
+      const matchBucket = !query
+        ? 0
+        : titleMatch
+          ? 0
+          : previewMatch
+            ? 1
+            : 2;
+
+      return {
+        noteId: note.id,
+        folderId: note.folderId,
+        title,
+        preview,
+        folderName,
+        updatedAt: note.updatedAt,
+        matchBucket,
+        matches,
+      };
+    })
+    .filter(result => result.matches)
+    .sort((a, b) => (a.matchBucket - b.matchBucket) || (b.updatedAt - a.updatedAt));
+
+  return results.slice(0, MAX_COMMAND_RESULTS);
+}
+
+function focusCommandPaletteInput() {
+  const input = document.getElementById('command-palette-input');
+  if (!input) return;
+  input.focus();
+  const caret = input.value.length;
+  input.setSelectionRange(caret, caret);
+}
+
+function renderCommandPalette({ focusInput = false } = {}) {
+  const existing = document.getElementById('command-palette-overlay');
+  if (existing) existing.remove();
+  if (!state.commandPaletteOpen) return;
+
+  const results = getCommandResults();
+  if (results.length === 0) {
+    state.commandSelectedIndex = 0;
+  } else if (state.commandSelectedIndex >= results.length || state.commandSelectedIndex < 0) {
+    state.commandSelectedIndex = 0;
+  }
+
+  const overlay = document.createElement('div');
+  overlay.id = 'command-palette-overlay';
+  overlay.className = 'command-palette-overlay';
+  overlay.onclick = () => closeCommandPalette();
+  overlay.innerHTML = `
+    <div class="command-palette" onclick="event.stopPropagation()">
+      <div class="command-palette-input-wrap">
+        <input
+          id="command-palette-input"
+          class="command-palette-input"
+          type="text"
+          value="${escapeHtml(state.commandQuery)}"
+          placeholder="Search notes, previews, and folders..."
+          oninput="setCommandQuery(this.value)" />
+      </div>
+      <div class="command-palette-results">
+        ${results.length === 0 ? `
+          <div class="command-palette-empty">No matching notes</div>
+        ` : results.map((result, index) => `
+          <button
+            class="command-result-item ${index === state.commandSelectedIndex ? 'active' : ''}"
+            onclick="selectCommandResult(${index})">
+            <div class="command-result-text">
+              <div class="command-result-title">${escapeHtml(result.title)}</div>
+              <div class="command-result-preview">${escapeHtml(result.preview.slice(0, 120))}</div>
+            </div>
+            <div class="command-result-meta">
+              <span class="command-result-folder">${escapeHtml(result.folderName)}</span>
+              <span class="command-result-date">${formatDate(result.updatedAt)}</span>
+            </div>
+          </button>
+        `).join('')}
+      </div>
+    </div>
+  `;
+  document.body.appendChild(overlay);
+
+  if (focusInput) {
+    focusCommandPaletteInput();
+  }
+}
+
+function openCommandPalette() {
+  if (state.commandPaletteOpen) {
+    focusCommandPaletteInput();
+    return;
+  }
+  state.commandPaletteOpen = true;
+  state.commandQuery = '';
+  state.commandSelectedIndex = 0;
+  closeContextMenu();
+  renderCommandPalette({ focusInput: true });
+}
+
+function closeCommandPalette() {
+  if (!state.commandPaletteOpen) return;
+  state.commandPaletteOpen = false;
+  state.commandQuery = '';
+  state.commandSelectedIndex = 0;
+  renderCommandPalette();
+}
+
+function setCommandQuery(value) {
+  state.commandQuery = value;
+  state.commandSelectedIndex = 0;
+  renderCommandPalette({ focusInput: true });
+}
+
+function moveCommandSelection(delta) {
+  const results = getCommandResults();
+  if (results.length === 0) return;
+  const len = results.length;
+  state.commandSelectedIndex = (state.commandSelectedIndex + delta + len) % len;
+  renderCommandPalette({ focusInput: true });
+}
+
+function selectCommandResult(index) {
+  const results = getCommandResults();
+  if (results.length === 0) return;
+  const safeIndex = Math.max(0, Math.min(index, results.length - 1));
+  const selected = results[safeIndex];
+  if (!selected) return;
+  state.activeFolderId = selected.folderId;
+  state.activeNoteId = selected.noteId;
+  closeCommandPalette();
+  render();
 }
 
 // ===== SORT HELPER =====
@@ -143,9 +309,18 @@ function renderNotesHeader() {
     ? 'Manual order - click to sort by date'
     : 'Date order - click to sort manually';
   const escapedSortTooltip = escapeHtml(sortTooltip);
+  const shortcutLabel = escapeHtml(getShortcutLabel());
+  const shortcutHint = escapeHtml(getShortcutHint());
   root.innerHTML = `
     ${expandBtn}
     <h2 class="notes-header-title">${activeFolder ? escapeHtml(activeFolder.name) : ''}</h2>
+    <button class="notes-search-trigger"
+            onclick="openCommandPalette()"
+            title="Search notes (${shortcutLabel})"
+            aria-label="Search notes (${shortcutLabel})">
+      <span class="notes-search-placeholder">Search notes...</span>
+      <span class="notes-search-shortcut">${shortcutHint}</span>
+    </button>
     <div class="sort-tooltip-wrap">
       <button class="sort-toggle-btn"
               onclick="toggleSortMode()"
@@ -788,6 +963,36 @@ document.addEventListener('contextmenu', (e) => {
 
 // ===== KEYBOARD SHORTCUTS =====
 document.addEventListener('keydown', (e) => {
+  if ((e.metaKey || e.ctrlKey) && e.key.toLowerCase() === 'k') {
+    e.preventDefault();
+    openCommandPalette();
+    return;
+  }
+
+  if (state.commandPaletteOpen) {
+    if (e.key === 'ArrowDown') {
+      e.preventDefault();
+      moveCommandSelection(1);
+      return;
+    }
+    if (e.key === 'ArrowUp') {
+      e.preventDefault();
+      moveCommandSelection(-1);
+      return;
+    }
+    if (e.key === 'Enter') {
+      e.preventDefault();
+      selectCommandResult(state.commandSelectedIndex);
+      return;
+    }
+    if (e.key === 'Escape') {
+      e.preventDefault();
+      closeCommandPalette();
+      return;
+    }
+    return;
+  }
+
   if ((e.metaKey || e.ctrlKey) && e.key === 'n') {
     e.preventDefault();
     if (state.activeFolderId) addNote();
@@ -822,6 +1027,10 @@ window.selectNote = selectNote;
 window.updateNoteTitle = updateNoteTitle;
 window.updateNoteBody = updateNoteBody;
 window.deleteNote = deleteNote;
+window.openCommandPalette = openCommandPalette;
+window.closeCommandPalette = closeCommandPalette;
+window.setCommandQuery = setCommandQuery;
+window.selectCommandResult = selectCommandResult;
 window.openSettingsModal = openSettingsModal;
 window.closeSettingsModal = closeSettingsModal;
 window.exportBackup = exportBackup;
