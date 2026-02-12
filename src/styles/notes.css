@@ -79,6 +79,158 @@
   height: 11px;
 }
 
+/* Sort toggle button */
+.sort-tooltip-wrap {
+  position: relative;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  flex-shrink: 0;
+}
+
+.sort-toggle-btn {
+  width: 32px;
+  height: 32px;
+  border-radius: 6px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  color: var(--text-tertiary);
+  transition: background 0.15s, color 0.15s;
+  flex-shrink: 0;
+}
+
+.sort-toggle-btn:hover {
+  background: var(--bg-secondary);
+  color: var(--text-primary);
+}
+
+.sort-tooltip-wrap:focus-within .sort-toggle-btn {
+  background: var(--bg-secondary);
+  color: var(--text-primary);
+}
+
+.sort-toggle-btn svg {
+  width: 16px;
+  height: 16px;
+}
+
+.sort-tooltip {
+  position: absolute;
+  left: 50%;
+  top: calc(100% + 8px);
+  transform: translateX(-50%) translateY(-4px);
+  background: var(--bg-primary);
+  color: var(--text-secondary);
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  box-shadow: 0 4px 14px rgba(0, 0, 0, 0.08);
+  font-size: 11px;
+  line-height: 1.25;
+  white-space: nowrap;
+  padding: 6px 8px;
+  opacity: 0;
+  visibility: hidden;
+  pointer-events: none;
+  z-index: 10;
+  transition: opacity 0.14s, transform 0.14s, visibility 0.14s;
+}
+
+.sort-tooltip-wrap:hover .sort-tooltip,
+.sort-tooltip-wrap:focus-within .sort-tooltip {
+  opacity: 1;
+  visibility: visible;
+  transform: translateX(-50%) translateY(0);
+}
+
+@media (hover: none), (pointer: coarse) {
+  .sort-tooltip {
+    display: none;
+  }
+}
+
+/* Pin indicator (static, on pinned cards) */
+.note-card-pin-indicator {
+  position: absolute;
+  top: 12px;
+  left: 4px;
+  width: 12px;
+  height: 12px;
+  color: var(--text-tertiary);
+  opacity: 0.5;
+}
+
+.note-card-pin-indicator svg {
+  width: 10px;
+  height: 10px;
+}
+
+.note-card.pinned {
+  padding-left: 18px;
+}
+
+/* Pin hover button */
+.note-card-pin {
+  position: absolute;
+  top: 10px;
+  right: 32px;
+  width: 22px;
+  height: 22px;
+  border-radius: 5px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  color: var(--text-tertiary);
+  opacity: 0;
+  transition: opacity 0.15s, background 0.15s, color 0.15s;
+}
+
+.note-card:hover .note-card-pin {
+  opacity: 1;
+}
+
+.note-card:hover .note-card-pin-indicator {
+  opacity: 0;
+}
+
+.note-card-pin:hover {
+  background: var(--bg-tertiary);
+  color: var(--accent);
+}
+
+.note-card-pin svg {
+  width: 11px;
+  height: 11px;
+}
+
+/* Pin separator */
+.notes-pin-separator {
+  height: 1px;
+  background: var(--border);
+  margin: 4px 8px;
+}
+
+/* Drag-and-drop states */
+.note-card[draggable="true"] {
+  cursor: grab;
+}
+
+.note-card[draggable="true"]:active {
+  cursor: grabbing;
+}
+
+.note-card.dragging {
+  opacity: 0.4;
+}
+
+.note-card.drop-above {
+  box-shadow: 0 -2px 0 0 var(--accent);
+}
+
+.note-card.drop-below {
+  box-shadow: 0 2px 0 0 var(--accent);
+}
+
 /* Empty notes list */
 .empty-notes {
   display: flex;

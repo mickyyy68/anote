@@ -11,6 +11,7 @@ export const state = {
   contextMenu: null,
   sidebarCollapsed: false,
   settingsModalOpen: false,
+  sortMode: 'manual',
 };
 
 export const DataLayer = {
@@ -24,7 +25,8 @@ export const DataLayer = {
       state.data.notes = notes.map(n => ({
         id: n.id, folderId: n.folder_id, title: n.title,
         preview: n.preview, body: null,
-        createdAt: n.created_at, updatedAt: n.updated_at
+        createdAt: n.created_at, updatedAt: n.updated_at,
+        pinned: n.pinned || 0, sortOrder: n.sort_order || 0
       }));
     } catch (e) {
       console.error('Failed to load data:', e);

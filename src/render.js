@@ -22,6 +22,19 @@ function stripMarkdown(md) {
     .trim();
 }
 
+// ===== SORT HELPER =====
+function getSortedFolderNotes(folderId) {
+  const notes = state.data.notes.filter(n => n.folderId === folderId);
+  if (state.sortMode === 'recent') {
+    return notes.sort((a, b) => (b.pinned - a.pinned) || (b.updatedAt - a.updatedAt));
+  }
+  // manual mode
+  return notes.sort((a, b) => (b.pinned - a.pinned) || (a.sortOrder - b.sortOrder));
+}
+
+// ===== DRAG STATE =====
+let draggedNoteId = null;
+
 // ===== RENDER HELPERS =====
 function renderSidebar() {
   const root = document.getElementById('sidebar-root');
@@ -125,9 +138,23 @@ function renderNotesHeader() {
       ${icons.panelLeft}
     </button>
   ` : '';
+  const sortIcon = state.sortMode === 'manual' ? icons.gripLines : icons.clock;
+  const sortTooltip = state.sortMode === 'manual'
+    ? 'Manual order - click to sort by date'
+    : 'Date order - click to sort manually';
+  const escapedSortTooltip = escapeHtml(sortTooltip);
   root.innerHTML = `
     ${expandBtn}
     <h2 class="notes-header-title">${activeFolder ? escapeHtml(activeFolder.name) : ''}</h2>
+    <div class="sort-tooltip-wrap">
+      <button class="sort-toggle-btn"
+              onclick="toggleSortMode()"
+              aria-label="${escapedSortTooltip}"
+              aria-describedby="sort-tooltip">
+        ${sortIcon}
+      </button>
+      <div class="sort-tooltip" id="sort-tooltip" role="tooltip">${escapedSortTooltip}</div>
+    </div>
     <button class="add-note-btn" onclick="addNote()">
       ${icons.plus}
       <span>New note</span>
@@ -138,10 +165,19 @@ function renderNotesHeader() {
 function renderNotesList() {
   const root = document.getElementById('notes-list-root');
   if (!root) return;
-  const { data, activeFolderId, activeNoteId } = state;
+  const { activeFolderId, activeNoteId } = state;
   const folderNotes = activeFolderId
-    ? data.notes.filter(n => n.folderId === activeFolderId).sort((a, b) => b.updatedAt - a.updatedAt)
+    ? getSortedFolderNotes(activeFolderId)
     : [];
+  const isManual = state.sortMode === 'manual';
+
+  if (isManual) {
+    root.setAttribute('ondragover', 'onNotesListDragOver(event)');
+    root.setAttribute('ondrop', 'onNotesListDrop(event)');
+  } else {
+    root.removeAttribute('ondragover');
+    root.removeAttribute('ondrop');
+  }
 
   if (folderNotes.length === 0) {
     root.innerHTML = `
@@ -152,18 +188,36 @@ function renderNotesList() {
       </div>
     `;
   } else {
-    root.innerHTML = folderNotes.map((note, i) => `
-      <div class="note-card ${activeNoteId === note.id ? 'active' : ''}"
+    let html = '';
+    let addedSeparator = false;
+    for (let i = 0; i < folderNotes.length; i++) {
+      const note = folderNotes[i];
+      // Add separator between pinned and unpinned groups
+      if (!addedSeparator && !note.pinned && i > 0 && folderNotes[i - 1].pinned) {
+        html += `<div class="notes-pin-separator"></div>`;
+        addedSeparator = true;
+      }
+      const dragAttrs = isManual ? `draggable="true" ondragstart="onNoteDragStart(event, '${note.id}')" ondragover="onNoteDragOver(event, '${note.id}')" ondragleave="onNoteDragLeave(event)" ondrop="onNoteDrop(event, '${note.id}')" ondragend="onNoteDragEnd(event)"` : '';
+      html += `
+      <div class="note-card ${activeNoteId === note.id ? 'active' : ''} ${note.pinned ? 'pinned' : ''}"
            onclick="selectNote('${note.id}')"
-           data-note-id="${note.id}">
+           oncontextmenu="showNoteContextMenu(event, '${note.id}')"
+           data-note-id="${note.id}"
+           data-pinned="${note.pinned ? '1' : '0'}"
+           ${dragAttrs}>
+        ${note.pinned ? `<div class="note-card-pin-indicator">${icons.pin}</div>` : ''}
         <div class="note-card-title">${escapeHtml(note.title || 'Untitled')}</div>
         <div class="note-card-preview">${escapeHtml(stripMarkdown(note.preview || '').slice(0, 80) || 'Empty note')}</div>
         <div class="note-card-date">${formatDate(note.updatedAt)}</div>
+        <button class="note-card-pin" onclick="event.stopPropagation(); togglePinNote('${note.id}')" title="${note.pinned ? 'Unpin' : 'Pin to top'}">
+          ${icons.pin}
+        </button>
         <button class="note-card-delete" onclick="event.stopPropagation(); deleteNote('${note.id}')" title="Delete note">
           ${icons.x}
         </button>
-      </div>
-    `).join('');
+      </div>`;
+    }
+    root.innerHTML = html;
   }
 }
 
@@ -324,9 +378,7 @@ function selectFolder(id) {
   state.activeFolderId = id;
   state.activeNoteId = null;
   // Auto-select first note
-  const folderNotes = state.data.notes
-    .filter(n => n.folderId === id)
-    .sort((a, b) => b.updatedAt - a.updatedAt);
+  const folderNotes = getSortedFolderNotes(id);
   if (folderNotes.length > 0) {
     state.activeNoteId = folderNotes[0].id;
   }
@@ -407,6 +459,9 @@ function closeContextMenu() {
 // ===== NOTE ACTIONS =====
 async function addNote() {
   if (!state.activeFolderId) return;
+  // Shift existing unpinned notes' sortOrder by +1
+  const unpinnedNotes = state.data.notes.filter(n => n.folderId === state.activeFolderId && !n.pinned);
+  unpinnedNotes.forEach(n => { n.sortOrder += 1; });
   const note = {
     id: generateId(),
     folderId: state.activeFolderId,
@@ -415,14 +470,18 @@ async function addNote() {
     body: '',
     createdAt: Date.now(),
     updatedAt: Date.now(),
+    pinned: 0,
+    sortOrder: 0,
   };
   state.data.notes.push(note);
   state.activeNoteId = note.id;
   await render({ focusTitle: true });
-  await invoke('create_note', {
+  invoke('create_note', {
     id: note.id, folderId: note.folderId, title: note.title,
-    body: note.body, createdAt: note.createdAt, updatedAt: note.updatedAt
+    body: note.body, createdAt: note.createdAt, updatedAt: note.updatedAt,
+    pinned: note.pinned, sortOrder: note.sortOrder
   });
+  invoke('reorder_notes', { updates: unpinnedNotes.map(n => [n.id, n.sortOrder]) });
 }
 
 function selectNote(id) {
@@ -486,13 +545,177 @@ function updateNoteCard(note) {
 async function deleteNote(id) {
   state.data.notes = state.data.notes.filter(n => n.id !== id);
   if (state.activeNoteId === id) {
-    const folderNotes = state.data.notes
-      .filter(n => n.folderId === state.activeFolderId)
-      .sort((a, b) => b.updatedAt - a.updatedAt);
+    const folderNotes = getSortedFolderNotes(state.activeFolderId);
     state.activeNoteId = folderNotes.length > 0 ? folderNotes[0].id : null;
   }
   render();
   await invoke('delete_note', { id });
+}
+
+// ===== DRAG-AND-DROP =====
+function onNoteDragStart(e, id) {
+  draggedNoteId = id;
+  e.dataTransfer.effectAllowed = 'move';
+  e.dataTransfer.setData('text/plain', id);
+  const card = e.currentTarget;
+  if (card) requestAnimationFrame(() => card.classList.add('dragging'));
+}
+
+function onNoteDragOver(e, targetId) {
+  e.preventDefault();
+  e.dataTransfer.dropEffect = 'move';
+  if (!draggedNoteId || draggedNoteId === targetId) return;
+  const draggedNote = state.data.notes.find(n => n.id === draggedNoteId);
+  const targetNote = state.data.notes.find(n => n.id === targetId);
+  if (!draggedNote || !targetNote) return;
+  // Reject cross-group drops
+  if (!!draggedNote.pinned !== !!targetNote.pinned) return;
+
+  const card = e.currentTarget;
+  if (!card) return;
+  // Clear existing indicators on all cards
+  document.querySelectorAll('.note-card').forEach(c => c.classList.remove('drop-above', 'drop-below'));
+  const rect = card.getBoundingClientRect();
+  const midY = rect.top + rect.height / 2;
+  if (e.clientY < midY) {
+    card.classList.add('drop-above');
+  } else {
+    card.classList.add('drop-below');
+  }
+}
+
+function onNoteDragLeave(e) {
+  const card = e.currentTarget;
+  if (card && !card.contains(e.relatedTarget)) {
+    card.classList.remove('drop-above', 'drop-below');
+  }
+}
+
+function applyManualReorder(orderedNotes) {
+  orderedNotes.forEach((n, i) => { n.sortOrder = i; });
+  draggedNoteId = null;
+  document.querySelectorAll('.note-card').forEach(c => c.classList.remove('dragging', 'drop-above', 'drop-below'));
+  renderNotesList();
+  invoke('reorder_notes', { updates: orderedNotes.map(n => [n.id, n.sortOrder]) });
+}
+
+function reorderByTarget(dragId, targetId, placement = 'above') {
+  if (!dragId || dragId === targetId) return;
+  const draggedNote = state.data.notes.find(n => n.id === dragId);
+  const targetNote = state.data.notes.find(n => n.id === targetId);
+  if (!draggedNote || !targetNote) return;
+  if (!!draggedNote.pinned !== !!targetNote.pinned) return;
+
+  const isPinned = !!draggedNote.pinned;
+  const group = getSortedFolderNotes(draggedNote.folderId).filter(n => !!n.pinned === isPinned);
+  const filtered = group.filter(n => n.id !== dragId);
+  let targetIdx = filtered.findIndex(n => n.id === targetId);
+  if (targetIdx === -1) return;
+  if (placement === 'below') targetIdx += 1;
+
+  filtered.splice(targetIdx, 0, draggedNote);
+  applyManualReorder(filtered);
+}
+
+function onNoteDrop(e, targetId) {
+  e.preventDefault();
+  e.stopPropagation();
+  if (!draggedNoteId || draggedNoteId === targetId) return;
+
+  const targetCard = e.currentTarget;
+  if (!targetCard) return;
+  const rect = targetCard.getBoundingClientRect();
+  const midY = rect.top + rect.height / 2;
+  const placement = e.clientY >= midY ? 'below' : 'above';
+  reorderByTarget(draggedNoteId, targetId, placement);
+}
+
+function onNotesListDragOver(e) {
+  if (!draggedNoteId) return;
+  e.preventDefault();
+  e.dataTransfer.dropEffect = 'move';
+}
+
+function onNotesListDrop(e) {
+  e.preventDefault();
+  if (!draggedNoteId) return;
+  if (e.target.closest('.note-card')) return;
+
+  const draggedNote = state.data.notes.find(n => n.id === draggedNoteId);
+  if (!draggedNote) return;
+
+  const isPinned = !!draggedNote.pinned;
+  const reordered = getSortedFolderNotes(draggedNote.folderId)
+    .filter(n => !!n.pinned === isPinned && n.id !== draggedNoteId);
+  reordered.push(draggedNote);
+  applyManualReorder(reordered);
+}
+
+function onNoteDragEnd() {
+  draggedNoteId = null;
+  document.querySelectorAll('.note-card').forEach(c => c.classList.remove('dragging', 'drop-above', 'drop-below'));
+}
+
+// ===== SORT & PIN =====
+function toggleSortMode() {
+  state.sortMode = state.sortMode === 'manual' ? 'recent' : 'manual';
+  renderNotesHeader();
+  renderNotesList();
+}
+
+async function togglePinNote(id) {
+  const note = state.data.notes.find(n => n.id === id);
+  if (!note) return;
+  note.pinned = note.pinned ? 0 : 1;
+  // Move to top of its new group
+  const folderNotes = state.data.notes.filter(n => n.folderId === note.folderId && n.id !== id);
+  if (note.pinned) {
+    // Newly pinned: give sortOrder 0, shift other pinned notes
+    const pinnedNotes = folderNotes.filter(n => n.pinned).sort((a, b) => a.sortOrder - b.sortOrder);
+    pinnedNotes.forEach((n, i) => { n.sortOrder = i + 1; });
+    note.sortOrder = 0;
+  } else {
+    // Newly unpinned: give sortOrder 0, shift other unpinned notes
+    const unpinnedNotes = folderNotes.filter(n => !n.pinned).sort((a, b) => a.sortOrder - b.sortOrder);
+    unpinnedNotes.forEach((n, i) => { n.sortOrder = i + 1; });
+    note.sortOrder = 0;
+  }
+  renderNotesList();
+  invoke('toggle_note_pinned', { id, pinned: note.pinned });
+  // Persist reorder for all notes in the folder
+  const allFolderNotes = state.data.notes.filter(n => n.folderId === note.folderId);
+  invoke('reorder_notes', { updates: allFolderNotes.map(n => [n.id, n.sortOrder]) });
+}
+
+function showNoteContextMenu(e, noteId) {
+  e.preventDefault();
+  e.stopPropagation();
+  closeContextMenu();
+
+  const note = state.data.notes.find(n => n.id === noteId);
+  if (!note) return;
+
+  const pinLabel = note.pinned ? 'Unpin' : 'Pin to top';
+  const menu = document.createElement('div');
+  menu.className = 'context-menu';
+  menu.style.left = e.clientX + 'px';
+  menu.style.top = e.clientY + 'px';
+  menu.innerHTML = `
+    <button class="context-menu-item" onclick="closeContextMenu(); togglePinNote('${noteId}')">
+      ${icons.pin} ${pinLabel}
+    </button>
+    <div class="context-menu-separator"></div>
+    <button class="context-menu-item danger" onclick="closeContextMenu(); deleteNote('${noteId}')">
+      ${icons.trash} Delete note
+    </button>
+  `;
+  document.body.appendChild(menu);
+
+  const rect = menu.getBoundingClientRect();
+  if (rect.right > window.innerWidth) menu.style.left = (window.innerWidth - rect.width - 8) + 'px';
+  if (rect.bottom > window.innerHeight) menu.style.top = (window.innerHeight - rect.height - 8) + 'px';
+
+  state.contextMenu = menu;
 }
 
 // ===== SETTINGS MODAL =====
@@ -560,7 +783,7 @@ async function exportBackup() {
 // ===== GLOBAL EVENT LISTENERS =====
 document.addEventListener('click', closeContextMenu);
 document.addEventListener('contextmenu', (e) => {
-  if (!e.target.closest('.folder-item')) closeContextMenu();
+  if (!e.target.closest('.folder-item') && !e.target.closest('.note-card')) closeContextMenu();
 });
 
 // ===== KEYBOARD SHORTCUTS =====
@@ -602,3 +825,13 @@ window.deleteNote = deleteNote;
 window.openSettingsModal = openSettingsModal;
 window.closeSettingsModal = closeSettingsModal;
 window.exportBackup = exportBackup;
+window.toggleSortMode = toggleSortMode;
+window.togglePinNote = togglePinNote;
+window.showNoteContextMenu = showNoteContextMenu;
+window.onNoteDragStart = onNoteDragStart;
+window.onNoteDragOver = onNoteDragOver;
+window.onNoteDragLeave = onNoteDragLeave;
+window.onNoteDrop = onNoteDrop;
+window.onNoteDragEnd = onNoteDragEnd;
+window.onNotesListDragOver = onNotesListDragOver;
+window.onNotesListDrop = onNotesListDrop;

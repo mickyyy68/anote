@@ -20,6 +20,12 @@ struct Note {
     body: String,
     created_at: i64,
     updated_at: i64,
+    // TEMP legacy-compat (added 12 02 2026): older localStorage imports don't include these fields.
+    // Remove this defaulting path once legacy migration support is dropped.
+    #[serde(default)]
+    pinned: i32,
+    #[serde(default)]
+    sort_order: i32,
 }
 
 #[derive(Serialize, Clone)]
@@ -30,6 +36,8 @@ struct NoteMetadata {
     preview: String,
     created_at: i64,
     updated_at: i64,
+    pinned: i32,
+    sort_order: i32,
 }
 
 fn init_db(conn: &Connection) {
@@ -80,6 +88,31 @@ fn init_db(conn: &Connection) {
         ",
     )
     .unwrap();
+
+    // Migration: add pinned and sort_order columns.
+    // Keep migrations independent so partial schema upgrades can recover.
+    let _ = conn.execute(
+        "ALTER TABLE notes ADD COLUMN pinned INTEGER NOT NULL DEFAULT 0",
+        [],
+    );
+    if conn
+        .execute(
+            "ALTER TABLE notes ADD COLUMN sort_order INTEGER NOT NULL DEFAULT 0",
+            [],
+        )
+        .is_ok()
+    {
+        // Initialize sort_order from updated_at so existing notes keep their visual order
+        let _ = conn.execute_batch(
+            "
+            WITH ranked AS (
+                SELECT id, ROW_NUMBER() OVER (PARTITION BY folder_id ORDER BY updated_at DESC) - 1 AS rn
+                FROM notes
+            )
+            UPDATE notes SET sort_order = (SELECT rn FROM ranked WHERE ranked.id = notes.id)
+            ",
+        );
+    }
 }
 
 // ===== Folder commands =====
@@ -140,7 +173,7 @@ fn delete_folder(db: State<Db>, id: String) -> Result<(), String> {
 fn get_notes_metadata(db: State<Db>) -> Result<Vec<NoteMetadata>, String> {
     let conn = db.0.lock().map_err(|e| e.to_string())?;
     let mut stmt = conn
-        .prepare("SELECT id, folder_id, title, substr(body, 1, 200), created_at, updated_at FROM notes ORDER BY updated_at DESC")
+        .prepare("SELECT id, folder_id, title, substr(body, 1, 200), created_at, updated_at, pinned, sort_order FROM notes")
         .map_err(|e| e.to_string())?;
     let notes = stmt
         .query_map([], |row| {
@@ -151,6 +184,8 @@ fn get_notes_metadata(db: State<Db>) -> Result<Vec<NoteMetadata>, String> {
                 preview: row.get(3)?,
                 created_at: row.get(4)?,
                 updated_at: row.get(5)?,
+                pinned: row.get(6)?,
+                sort_order: row.get(7)?,
             })
         })
         .map_err(|e| e.to_string())?
@@ -176,7 +211,7 @@ fn get_note_body(db: State<Db>, id: String) -> Result<String, String> {
 fn get_notes_all(db: State<Db>) -> Result<Vec<Note>, String> {
     let conn = db.0.lock().map_err(|e| e.to_string())?;
     let mut stmt = conn
-        .prepare("SELECT id, folder_id, title, body, created_at, updated_at FROM notes ORDER BY updated_at DESC")
+        .prepare("SELECT id, folder_id, title, body, created_at, updated_at, pinned, sort_order FROM notes")
         .map_err(|e| e.to_string())?;
     let notes = stmt
         .query_map([], |row| {
@@ -187,6 +222,8 @@ fn get_notes_all(db: State<Db>) -> Result<Vec<Note>, String> {
                 body: row.get(3)?,
                 created_at: row.get(4)?,
                 updated_at: row.get(5)?,
+                pinned: row.get(6)?,
+                sort_order: row.get(7)?,
             })
         })
         .map_err(|e| e.to_string())?
@@ -204,11 +241,13 @@ fn create_note(
     body: String,
     created_at: i64,
     updated_at: i64,
+    pinned: i32,
+    sort_order: i32,
 ) -> Result<(), String> {
     let conn = db.0.lock().map_err(|e| e.to_string())?;
     conn.execute(
-        "INSERT INTO notes (id, folder_id, title, body, created_at, updated_at) VALUES (?1, ?2, ?3, ?4, ?5, ?6)",
-        rusqlite::params![id, folder_id, title, body, created_at, updated_at],
+        "INSERT INTO notes (id, folder_id, title, body, created_at, updated_at, pinned, sort_order) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8)",
+        rusqlite::params![id, folder_id, title, body, created_at, updated_at, pinned, sort_order],
     )
     .map_err(|e| e.to_string())?;
     Ok(())
@@ -239,6 +278,34 @@ fn delete_note(db: State<Db>, id: String) -> Result<(), String> {
     Ok(())
 }
 
+// ===== Pin & reorder commands =====
+
+#[tauri::command]
+fn toggle_note_pinned(db: State<Db>, id: String, pinned: i32) -> Result<(), String> {
+    let conn = db.0.lock().map_err(|e| e.to_string())?;
+    conn.execute(
+        "UPDATE notes SET pinned = ?1 WHERE id = ?2",
+        rusqlite::params![pinned, id],
+    )
+    .map_err(|e| e.to_string())?;
+    Ok(())
+}
+
+#[tauri::command]
+fn reorder_notes(db: State<Db>, updates: Vec<(String, i32)>) -> Result<(), String> {
+    let mut conn = db.0.lock().map_err(|e| e.to_string())?;
+    let tx = conn.transaction().map_err(|e| e.to_string())?;
+    for (id, sort_order) in &updates {
+        tx.execute(
+            "UPDATE notes SET sort_order = ?1 WHERE id = ?2",
+            rusqlite::params![sort_order, id],
+        )
+        .map_err(|e| e.to_string())?;
+    }
+    tx.commit().map_err(|e| e.to_string())?;
+    Ok(())
+}
+
 // ===== Data migration command =====
 
 #[tauri::command]
@@ -254,8 +321,8 @@ fn import_data(db: State<Db>, folders: Vec<Folder>, notes: Vec<Note>) -> Result<
     }
     for note in &notes {
         tx.execute(
-            "INSERT OR IGNORE INTO notes (id, folder_id, title, body, created_at, updated_at) VALUES (?1, ?2, ?3, ?4, ?5, ?6)",
-            rusqlite::params![note.id, note.folder_id, note.title, note.body, note.created_at, note.updated_at],
+            "INSERT OR IGNORE INTO notes (id, folder_id, title, body, created_at, updated_at, pinned, sort_order) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8)",
+            rusqlite::params![note.id, note.folder_id, note.title, note.body, note.created_at, note.updated_at, note.pinned, note.sort_order],
         )
         .map_err(|e| e.to_string())?;
     }
@@ -287,7 +354,7 @@ fn export_backup(db: State<Db>) -> Result<String, String> {
 
     // Query all notes (full body)
     let mut note_stmt = conn
-        .prepare("SELECT id, folder_id, title, body, created_at, updated_at FROM notes ORDER BY updated_at DESC")
+        .prepare("SELECT id, folder_id, title, body, created_at, updated_at, pinned, sort_order FROM notes")
         .map_err(|e| e.to_string())?;
     let notes: Vec<serde_json::Value> = note_stmt
         .query_map([], |row| {
@@ -297,7 +364,9 @@ fn export_backup(db: State<Db>) -> Result<String, String> {
                 "title": row.get::<_, String>(2)?,
                 "body": row.get::<_, String>(3)?,
                 "created_at": row.get::<_, i64>(4)?,
-                "updated_at": row.get::<_, i64>(5)?
+                "updated_at": row.get::<_, i64>(5)?,
+                "pinned": row.get::<_, i32>(6)?,
+                "sort_order": row.get::<_, i32>(7)?
             }))
         })
         .map_err(|e| e.to_string())?
@@ -371,6 +440,8 @@ pub fn run() {
             create_note,
             update_note,
             delete_note,
+            toggle_note_pinned,
+            reorder_notes,
             import_data,
             export_backup,
         ])
