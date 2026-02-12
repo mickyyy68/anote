@@ -79,6 +79,7 @@ Tauri auto-converts JS camelCase params to Rust snake_case (e.g., `folderId` →
 - **Index Maps:** Use `state.notesById`/`foldersById` for lookups, never `.find()`. Keep Maps in sync at mutation sites or call `rebuildIndexes()`.
 - **Dirty flags:** Set `dirty.sidebar`/`notesHeader`/`notesList` before `render()`. Omit for full-layout changes.
 - **Per-note debounce:** Call `flushPendingSaves()` before switching note, folder, or on app close.
+- **Code comments:** Add concise comments only where logic is non-obvious; skip comments for straightforward code.
 
 ### Key Config
 

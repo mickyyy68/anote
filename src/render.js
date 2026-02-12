@@ -106,6 +106,28 @@ function ftsResultToCommand(n) {
   };
 }
 
+function getFolderNameMatches(query, excludedIds = new Set()) {
+  const normalizedQuery = query.toLowerCase();
+  const matches = [];
+  for (const note of state.data.notes) {
+    if (excludedIds.has(note.id)) continue;
+    const folder = state.foldersById.get(note.folderId);
+    const folderName = folder ? folder.name : 'Untitled folder';
+    if (!folderName.toLowerCase().includes(normalizedQuery)) continue;
+    matches.push({
+      noteId: note.id,
+      folderId: note.folderId,
+      title: note.title || 'Untitled',
+      preview: getStrippedPreview(note.preview || '') || 'Empty note',
+      folderName,
+      updatedAt: note.updatedAt,
+    });
+  }
+  // Keep local folder-name matches ordered like other command results.
+  matches.sort((a, b) => b.updatedAt - a.updatedAt);
+  return matches;
+}
+
 function triggerFtsSearch(query) {
   if (ftsSearchTimeout) clearTimeout(ftsSearchTimeout);
   ftsSearchTimeout = setTimeout(async () => {
@@ -120,7 +142,7 @@ function triggerFtsSearch(query) {
       cachedFtsResults = null;
     }
     state.commandSelectedIndex = 0;
-    renderCommandPalette({ focusInput: true });
+    updateCommandResultsUI({ ensureActiveVisible: true });
   }, 150);
 }
 
@@ -132,17 +154,55 @@ function focusCommandPaletteInput() {
   input.setSelectionRange(caret, caret);
 }
 
+function normalizeCommandSelection(results) {
+  if (results.length === 0) {
+    state.commandSelectedIndex = 0;
+    return;
+  }
+  if (state.commandSelectedIndex >= results.length || state.commandSelectedIndex < 0) {
+    state.commandSelectedIndex = 0;
+  }
+}
+
+function renderCommandResultsMarkup(results) {
+  if (results.length === 0) return '<div class="command-palette-empty">No matching notes</div>';
+  return results.map((result, index) => `
+    <button
+      class="command-result-item ${index === state.commandSelectedIndex ? 'active' : ''}"
+      data-command-index="${index}"
+      onclick="selectCommandResult(${index})">
+      <div class="command-result-text">
+        <div class="command-result-title">${escapeHtml(result.title)}</div>
+        <div class="command-result-preview">${escapeHtml(result.preview.slice(0, 120))}</div>
+      </div>
+      <div class="command-result-meta">
+        <span class="command-result-folder">${escapeHtml(result.folderName)}</span>
+        <span class="command-result-date">${formatDate(result.updatedAt)}</span>
+      </div>
+    </button>
+  `).join('');
+}
+
+function updateCommandResultsUI({ ensureActiveVisible = false } = {}) {
+  const overlay = document.getElementById('command-palette-overlay');
+  if (!overlay || !state.commandPaletteOpen) return;
+  const resultsEl = overlay.querySelector('.command-palette-results');
+  if (!resultsEl) return;
+
+  const results = getActiveResults();
+  normalizeCommandSelection(results);
+  resultsEl.innerHTML = renderCommandResultsMarkup(results);
+
+  if (ensureActiveVisible && results.length > 0) {
+    const activeEl = resultsEl.querySelector('.command-result-item.active');
+    if (activeEl) activeEl.scrollIntoView({ block: 'nearest' });
+  }
+}
+
 function renderCommandPalette({ focusInput = false } = {}) {
   const existing = document.getElementById('command-palette-overlay');
   if (existing) existing.remove();
   if (!state.commandPaletteOpen) return;
-
-  const results = getActiveResults();
-  if (results.length === 0) {
-    state.commandSelectedIndex = 0;
-  } else if (state.commandSelectedIndex >= results.length || state.commandSelectedIndex < 0) {
-    state.commandSelectedIndex = 0;
-  }
 
   const overlay = document.createElement('div');
   overlay.id = 'command-palette-overlay';
@@ -159,28 +219,11 @@ function renderCommandPalette({ focusInput = false } = {}) {
           placeholder="Search notes, previews, and folders..."
           oninput="setCommandQuery(this.value)" />
       </div>
-      <div class="command-palette-results">
-        ${results.length === 0 ? `
-          <div class="command-palette-empty">No matching notes</div>
-        ` : results.map((result, index) => `
-          <button
-            class="command-result-item ${index === state.commandSelectedIndex ? 'active' : ''}"
-            data-command-index="${index}"
-            onclick="selectCommandResult(${index})">
-            <div class="command-result-text">
-              <div class="command-result-title">${escapeHtml(result.title)}</div>
-              <div class="command-result-preview">${escapeHtml(result.preview.slice(0, 120))}</div>
-            </div>
-            <div class="command-result-meta">
-              <span class="command-result-folder">${escapeHtml(result.folderName)}</span>
-              <span class="command-result-date">${formatDate(result.updatedAt)}</span>
-            </div>
-          </button>
-        `).join('')}
-      </div>
+      <div class="command-palette-results"></div>
     </div>
   `;
   document.body.appendChild(overlay);
+  updateCommandResultsUI();
 
   if (focusInput) {
     focusCommandPaletteInput();
@@ -220,12 +263,21 @@ function setCommandQuery(value) {
     cachedFtsResults = null;
     if (ftsSearchTimeout) { clearTimeout(ftsSearchTimeout); ftsSearchTimeout = null; }
   }
-  renderCommandPalette({ focusInput: true });
+  updateCommandResultsUI({ ensureActiveVisible: true });
 }
 
 function getActiveResults() {
   const query = state.commandQuery.trim();
-  return query && cachedFtsResults !== null ? cachedFtsResults : getCommandResults();
+  if (!query || cachedFtsResults === null) return getCommandResults();
+  // FTS currently indexes title/body only. Merge folder-name matches from local state
+  // so folder queries still work after async FTS results arrive.
+  const seen = new Set(cachedFtsResults.map(result => result.noteId));
+  const merged = cachedFtsResults.slice();
+  for (const folderMatch of getFolderNameMatches(query, seen)) {
+    merged.push(folderMatch);
+    if (merged.length >= MAX_COMMAND_RESULTS) break;
+  }
+  return merged;
 }
 
 function updateCommandSelectionUI(prevIndex, nextIndex) {
@@ -776,8 +828,9 @@ const lastSaved = new Map();
 function persistNote(note) {
   const key = note.id;
   const prev = lastSaved.get(key);
-  if (prev && prev.title === note.title && prev.body === note.body) return;
-  lastSaved.set(key, { title: note.title, body: note.body });
+  // Include updatedAt in dedupe so timestamp-only updates still persist to SQLite.
+  if (prev && prev.title === note.title && prev.body === note.body && prev.updatedAt === note.updatedAt) return;
+  lastSaved.set(key, { title: note.title, body: note.body, updatedAt: note.updatedAt });
   invoke('update_note', {
     id: note.id, title: note.title, body: note.body, updatedAt: note.updatedAt
   });
