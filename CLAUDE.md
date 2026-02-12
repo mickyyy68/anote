@@ -20,6 +20,10 @@ cd src-tauri && cargo build    # Full debug build
 
 No tests or linting are configured.
 
+## Dependencies
+
+Prefer hand-written code over adding dependencies. Small utilities, UI patterns, and helpers should be implemented directly — not pulled from npm. Only use libraries for things that would be unreasonable to build in-house (e.g., the markdown editor, database driver, framework core). When tempted to `npm install`, first ask: can this be written in under ~500 lines of focused code?
+
 ## Architecture
 
 Tauri v2 desktop app: Rust backend + Vite-bundled modular frontend with Milkdown markdown editor.
