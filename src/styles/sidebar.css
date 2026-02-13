@@ -163,6 +163,32 @@
   height: 14px;
 }
 
+.folder-chevron {
+  width: 16px;
+  height: 16px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  cursor: pointer;
+  flex-shrink: 0;
+  transition: transform 0.15s;
+}
+
+.folder-chevron svg {
+  width: 12px;
+  height: 12px;
+  color: var(--text-tertiary);
+}
+
+.folder-chevron.expanded {
+  transform: rotate(90deg);
+}
+
+.folder-chevron-spacer {
+  width: 16px;
+  flex-shrink: 0;
+}
+
 .folder-name {
   flex: 1;
   font-size: 13px;
@@ -229,6 +255,56 @@
 .folder-action-btn svg {
   width: 12px;
   height: 12px;
+}
+
+.folder-menu-btn svg {
+  width: 14px;
+  height: 14px;
+}
+
+.folder-menu {
+  display: none;
+  position: absolute;
+  right: 8px;
+  top: 100%;
+  background: var(--bg-primary);
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  box-shadow: 0 4px 12px rgba(0, 0, 0, 0.15);
+  z-index: 100;
+  min-width: 140px;
+  padding: 4px;
+}
+
+.folder-menu.open {
+  display: block;
+}
+
+.folder-menu-item {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 8px 10px;
+  border-radius: 6px;
+  cursor: pointer;
+  font-size: 13px;
+  color: var(--text-secondary);
+}
+
+.folder-menu-item:hover {
+  background: var(--bg-tertiary);
+  color: var(--text-primary);
+}
+
+.folder-menu-item.danger:hover {
+  background: rgba(196, 69, 60, 0.1);
+  color: #C4453C;
+}
+
+.folder-menu-item svg {
+  width: 14px;
+  height: 14px;
+  flex-shrink: 0;
 }
 
 /* Empty folder state */

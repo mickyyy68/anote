@@ -440,6 +440,15 @@
   height: 14px;
 }
 
+.backup-buttons-row {
+  display: flex;
+  gap: 8px;
+}
+
+.backup-buttons-row .settings-action-btn {
+  flex: 1;
+}
+
 .backup-status {
   display: none;
   font-size: 12px;

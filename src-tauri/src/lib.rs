@@ -10,6 +10,7 @@ struct Folder {
     id: String,
     name: String,
     created_at: i64,
+    parent_id: Option<String>,
 }
 
 #[derive(Serialize, Deserialize, Clone)]
@@ -96,9 +97,7 @@ fn init_db(conn: &Connection) {
 
     if version < 1 {
         // Add pinned and sort_order columns (skip if already present from old migration path)
-        let has_pinned: bool = conn
-            .prepare("SELECT pinned FROM notes LIMIT 0")
-            .is_ok();
+        let has_pinned: bool = conn.prepare("SELECT pinned FROM notes LIMIT 0").is_ok();
         if !has_pinned {
             conn.execute(
                 "ALTER TABLE notes ADD COLUMN pinned INTEGER NOT NULL DEFAULT 0",
@@ -133,7 +132,21 @@ fn init_db(conn: &Connection) {
         }
         conn.pragma_update(None, "user_version", 1).unwrap();
     }
-    // Future migrations: if version < 2 { ... conn.pragma_update(None, "user_version", 2).unwrap(); }
+
+    if version < 2 {
+        let has_parent_id = conn
+            .prepare("SELECT parent_id FROM folders LIMIT 0")
+            .is_ok();
+        if !has_parent_id {
+            conn.execute(
+                "ALTER TABLE folders ADD COLUMN parent_id TEXT REFERENCES folders(id) ON DELETE SET NULL",
+                [],
+            )
+            .unwrap();
+        }
+        conn.pragma_update(None, "user_version", 2).unwrap();
+    }
+    // Future migrations: if version < 3 { ... conn.pragma_update(None, "user_version", 3).unwrap(); }
 }
 
 // ===== Folder commands =====
@@ -142,7 +155,7 @@ fn init_db(conn: &Connection) {
 fn get_folders(db: State<Db>) -> Result<Vec<Folder>, String> {
     let conn = db.0.lock().map_err(|e| e.to_string())?;
     let mut stmt = conn
-        .prepare("SELECT id, name, created_at FROM folders ORDER BY created_at")
+        .prepare("SELECT id, name, created_at, parent_id FROM folders ORDER BY created_at")
         .map_err(|e| e.to_string())?;
     let folders = stmt
         .query_map([], |row| {
@@ -150,6 +163,7 @@ fn get_folders(db: State<Db>) -> Result<Vec<Folder>, String> {
                 id: row.get(0)?,
                 name: row.get(1)?,
                 created_at: row.get(2)?,
+                parent_id: row.get(3)?,
             })
         })
         .map_err(|e| e.to_string())?
@@ -159,11 +173,17 @@ fn get_folders(db: State<Db>) -> Result<Vec<Folder>, String> {
 }
 
 #[tauri::command]
-fn create_folder(db: State<Db>, id: String, name: String, created_at: i64) -> Result<(), String> {
+fn create_folder(
+    db: State<Db>,
+    id: String,
+    name: String,
+    created_at: i64,
+    parent_id: Option<String>,
+) -> Result<(), String> {
     let conn = db.0.lock().map_err(|e| e.to_string())?;
     conn.execute(
-        "INSERT INTO folders (id, name, created_at) VALUES (?1, ?2, ?3)",
-        rusqlite::params![id, name, created_at],
+        "INSERT INTO folders (id, name, created_at, parent_id) VALUES (?1, ?2, ?3, ?4)",
+        rusqlite::params![id, name, created_at, parent_id],
     )
     .map_err(|e| e.to_string())?;
     Ok(())
@@ -183,6 +203,29 @@ fn rename_folder(db: State<Db>, id: String, name: String) -> Result<(), String> 
 #[tauri::command]
 fn delete_folder(db: State<Db>, id: String) -> Result<(), String> {
     let conn = db.0.lock().map_err(|e| e.to_string())?;
+    delete_folder_recursive(&conn, &id)?;
+    Ok(())
+}
+
+fn delete_folder_recursive(conn: &Connection, id: &str) -> Result<(), String> {
+    let mut stmt = conn
+        .prepare("SELECT id FROM folders WHERE parent_id = ?1")
+        .map_err(|e| e.to_string())?;
+    let children: Vec<String> = stmt
+        .query_map(rusqlite::params![id], |row| row.get(0))
+        .map_err(|e| e.to_string())?
+        .collect::<Result<Vec<_>, _>>()
+        .map_err(|e| e.to_string())?;
+
+    for child_id in children {
+        delete_folder_recursive(conn, &child_id)?;
+    }
+
+    conn.execute(
+        "DELETE FROM notes WHERE folder_id = ?1",
+        rusqlite::params![id],
+    )
+    .map_err(|e| e.to_string())?;
     conn.execute("DELETE FROM folders WHERE id = ?1", rusqlite::params![id])
         .map_err(|e| e.to_string())?;
     Ok(())
@@ -380,8 +423,8 @@ fn import_data(db: State<Db>, folders: Vec<Folder>, notes: Vec<Note>) -> Result<
     let tx = conn.transaction().map_err(|e| e.to_string())?;
     for folder in &folders {
         tx.execute(
-            "INSERT OR IGNORE INTO folders (id, name, created_at) VALUES (?1, ?2, ?3)",
-            rusqlite::params![folder.id, folder.name, folder.created_at],
+            "INSERT OR IGNORE INTO folders (id, name, created_at, parent_id) VALUES (?1, ?2, ?3, ?4)",
+            rusqlite::params![folder.id, folder.name, folder.created_at, folder.parent_id],
         )
         .map_err(|e| e.to_string())?;
     }
@@ -404,14 +447,15 @@ fn export_backup(db: State<Db>) -> Result<String, String> {
 
     // Query all folders
     let mut folder_stmt = conn
-        .prepare("SELECT id, name, created_at FROM folders ORDER BY created_at")
+        .prepare("SELECT id, name, created_at, parent_id FROM folders ORDER BY created_at")
         .map_err(|e| e.to_string())?;
     let folders: Vec<serde_json::Value> = folder_stmt
         .query_map([], |row| {
             Ok(serde_json::json!({
                 "id": row.get::<_, String>(0)?,
                 "name": row.get::<_, String>(1)?,
-                "created_at": row.get::<_, i64>(2)?
+                "created_at": row.get::<_, i64>(2)?,
+                "parent_id": row.get::<_, Option<String>>(3)?
             }))
         })
         .map_err(|e| e.to_string())?

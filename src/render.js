@@ -16,7 +16,91 @@ function markAllDirty() { dirty.sidebar = true; dirty.notesHeader = true; dirty.
 function clearDirty() { dirty.sidebar = false; dirty.notesHeader = false; dirty.notesList = false; }
 function isDirtySet() { return dirty.sidebar || dirty.notesHeader || dirty.notesList; }
 
+function getChildFolders(parentId) {
+  return state.data.folders.filter(f => f.parentId === parentId);
+}
+
+function hasChildren(folderId) {
+  return state.data.folders.some(f => f.parentId === folderId);
+}
+
+function toggleFolderExpanded(folderId) {
+  if (state.expandedFolders.has(folderId)) {
+    state.expandedFolders.delete(folderId);
+  } else {
+    state.expandedFolders.add(folderId);
+  }
+  dirty.sidebar = true;
+  render();
+}
+
+function renderFolderTree(parentId, depth) {
+  const { activeFolderId, editingFolderId, expandedFolders } = state;
+  const children = getChildFolders(parentId);
+  
+  return children.map(folder => {
+    const count = state.notesCountByFolder.get(folder.id) || 0;
+    const isEditing = editingFolderId === folder.id;
+    const isActive = activeFolderId === folder.id;
+    const hasKids = hasChildren(folder.id);
+    const isExpanded = expandedFolders.has(folder.id);
+    const indent = depth * 16;
+    
+    let html = `
+      <li class="folder-item ${isActive ? 'active' : ''}" style="padding-left: ${indent}px"
+          onclick="selectFolder('${folder.id}')"
+          oncontextmenu="showFolderContextMenu(event, '${folder.id}')">
+        ${hasKids ? `
+          <span class="folder-chevron ${isExpanded ? 'expanded' : ''}" 
+                onclick="event.stopPropagation(); toggleFolderExpanded('${folder.id}')">
+            ${icons.chevron}
+          </span>
+        ` : '<span class="folder-chevron-spacer"></span>'}
+        <div class="folder-icon">${icons.folder}</div>
+        ${isEditing ? `
+          <input class="folder-name-input"
+                 type="text"
+                 value="${escapeHtml(folder.name)}"
+                 onclick="event.stopPropagation()"
+                 onblur="finishEditingFolder('${folder.id}', this.value)"
+                 onkeydown="handleFolderKeydown(event, '${folder.id}', this.value)"
+                 id="folder-edit-${folder.id}" />
+        ` : `
+          <span class="folder-name">${escapeHtml(folder.name)}</span>
+        `}
+        <span class="folder-count">${count}</span>
+        <div class="folder-actions">
+          <button class="folder-action-btn folder-menu-btn" onclick="event.stopPropagation(); toggleFolderMenu('${folder.id}')" title="More">
+            ${icons.dots}
+          </button>
+        </div>
+        <div class="folder-menu" id="folder-menu-${folder.id}">
+          <div class="folder-menu-item" onclick="event.stopPropagation(); addFolder('${folder.id}'); closeFolderMenus()">
+            ${icons.plus}
+            <span>Add subfolder</span>
+          </div>
+          <div class="folder-menu-item" onclick="event.stopPropagation(); startEditingFolder('${folder.id}'); closeFolderMenus()">
+            ${icons.edit}
+            <span>Rename</span>
+          </div>
+          <div class="folder-menu-item danger" onclick="event.stopPropagation(); deleteFolder('${folder.id}'); closeFolderMenus()">
+            ${icons.trash}
+            <span>Delete</span>
+          </div>
+        </div>
+      </li>
+    `;
+    
+    if (hasKids && isExpanded) {
+      html += renderFolderTree(folder.id, depth + 1);
+    }
+    
+    return html;
+  }).join('');
+}
+
 const strippedPreviewCache = new Map();
+const SAFE_ID_RE = /^[A-Za-z0-9]+$/;
 
 function stripMarkdown(md) {
   return md
@@ -40,6 +124,10 @@ function getStrippedPreview(raw) {
   result = stripMarkdown(raw);
   strippedPreviewCache.set(raw, result);
   return result;
+}
+
+function isSafeId(value) {
+  return typeof value === 'string' && SAFE_ID_RE.test(value);
 }
 
 function isMacPlatform() {
@@ -362,39 +450,7 @@ function renderSidebar() {
         </div>
       ` : `
         <ul class="folder-list">
-          ${(() => {
-            return data.folders.map((folder, i) => {
-            const count = state.notesCountByFolder.get(folder.id) || 0;
-            const isEditing = editingFolderId === folder.id;
-            return `
-              <li class="folder-item ${activeFolderId === folder.id ? 'active' : ''}"
-                  onclick="selectFolder('${folder.id}')"
-                  oncontextmenu="showFolderContextMenu(event, '${folder.id}')">
-                <div class="folder-icon">${icons.folder}</div>
-                ${isEditing ? `
-                  <input class="folder-name-input"
-                         type="text"
-                         value="${escapeHtml(folder.name)}"
-                         onclick="event.stopPropagation()"
-                         onblur="finishEditingFolder('${folder.id}', this.value)"
-                         onkeydown="handleFolderKeydown(event, '${folder.id}', this.value)"
-                         id="folder-edit-${folder.id}" />
-                ` : `
-                  <span class="folder-name">${escapeHtml(folder.name)}</span>
-                `}
-                <span class="folder-count">${count}</span>
-                <div class="folder-actions">
-                  <button class="folder-action-btn" onclick="event.stopPropagation(); startEditingFolder('${folder.id}')" title="Rename">
-                    ${icons.edit}
-                  </button>
-                  <button class="folder-action-btn delete" onclick="event.stopPropagation(); deleteFolder('${folder.id}')" title="Delete">
-                    ${icons.trash}
-                  </button>
-                </div>
-              </li>
-            `;
-          }).join('');
-          })()}
+          ${renderFolderTree(null, 0)}
         </ul>
       `}
     </div>
@@ -659,11 +715,13 @@ function toggleSidebar() {
 }
 
 // ===== FOLDER ACTIONS =====
-async function addFolder() {
+async function addFolder(parentId = null) {
+  const targetParentId = parentId ?? null;
   const folder = {
     id: generateId(),
     name: 'New folder',
     createdAt: Date.now(),
+    parentId: targetParentId,
   };
   state.data.folders.push(folder);
   state.foldersById.set(folder.id, folder);
@@ -672,9 +730,15 @@ async function addFolder() {
   state.activeFolderId = folder.id;
   state.activeNoteId = null;
   state.editingFolderId = folder.id;
+  if (targetParentId) {
+    state.expandedFolders.add(targetParentId);
+  }
+  dirty.sidebar = true;
+  dirty.notesHeader = true;
+  dirty.notesList = true;
   render();
   await invoke('create_folder', {
-    id: folder.id, name: folder.name, createdAt: folder.createdAt
+    id: folder.id, name: folder.name, createdAt: folder.createdAt, parentId: folder.parentId
   });
 }
 
@@ -721,19 +785,40 @@ function handleFolderKeydown(e, id, value) {
 }
 
 async function deleteFolder(id) {
-  const folderNotes = state.notesByFolderId.get(id) || [];
-  for (const n of folderNotes) state.notesById.delete(n.id);
-  state.data.folders = state.data.folders.filter(f => f.id !== id);
-  state.data.notes = state.data.notes.filter(n => n.folderId !== id);
-  state.foldersById.delete(id);
-  state.notesByFolderId.delete(id);
-  state.notesCountByFolder.delete(id);
-  if (state.activeFolderId === id) {
+  closeFolderMenus();
+  const folderIdsToDelete = getDescendantFolderIds(id);
+  folderIdsToDelete.push(id);
+  const folderIdsSet = new Set(folderIdsToDelete);
+  
+  for (const folderId of folderIdsToDelete) {
+    const folderNotes = state.notesByFolderId.get(folderId) || [];
+    for (const n of folderNotes) {
+      state.notesById.delete(n.id);
+    }
+    state.foldersById.delete(folderId);
+    state.notesByFolderId.delete(folderId);
+    state.notesCountByFolder.delete(folderId);
+    state.expandedFolders.delete(folderId);
+  }
+  state.data.folders = state.data.folders.filter(f => !folderIdsSet.has(f.id));
+  state.data.notes = state.data.notes.filter(n => !folderIdsSet.has(n.folderId));
+  
+  if (folderIdsSet.has(state.activeFolderId)) {
     state.activeFolderId = null;
     state.activeNoteId = null;
   }
   render();
   await invoke('delete_folder', { id });
+}
+
+function getDescendantFolderIds(parentId) {
+  const descendants = [];
+  const children = getChildFolders(parentId);
+  for (const child of children) {
+    descendants.push(child.id);
+    descendants.push(...getDescendantFolderIds(child.id));
+  }
+  return descendants;
 }
 
 function showFolderContextMenu(e, folderId) {
@@ -769,6 +854,20 @@ function closeContextMenu() {
     state.contextMenu.remove();
     state.contextMenu = null;
   }
+}
+
+function toggleFolderMenu(folderId) {
+  const menu = document.getElementById(`folder-menu-${folderId}`);
+  if (!menu) return;
+  const wasOpen = menu.classList.contains('open');
+  closeFolderMenus();
+  if (!wasOpen) {
+    menu.classList.add('open');
+  }
+}
+
+function closeFolderMenus() {
+  document.querySelectorAll('.folder-menu.open').forEach(m => m.classList.remove('open'));
 }
 
 // ===== NOTE ACTIONS =====
@@ -1110,10 +1209,17 @@ function renderSettingsModal() {
             <h3>Backup</h3>
             <p>Export all your folders and notes as a JSON file to <code>~/.anote/backups/</code></p>
           </div>
-          <button class="settings-action-btn" onclick="exportBackup()">
-            ${icons.download}
-            <span>Export Backup</span>
-          </button>
+          <div class="backup-buttons-row">
+            <button class="settings-action-btn" onclick="exportBackup()">
+              ${icons.download}
+              <span>Export</span>
+            </button>
+            <button class="settings-action-btn" onclick="document.getElementById('import-file-input').click()">
+              ${icons.upload}
+              <span>Import</span>
+            </button>
+            <input type="file" id="import-file-input" accept=".json" style="display: none" onchange="importBackup(event)">
+          </div>
           <div class="backup-status" id="backup-status"></div>
         </div>
       </div>
@@ -1147,6 +1253,91 @@ async function exportBackup() {
     statusEl.className = 'backup-status error';
     statusEl.textContent = `Export failed: ${e}`;
   }
+}
+
+async function importBackup(event) {
+  const statusEl = document.getElementById('backup-status');
+  if (!statusEl) return;
+
+  const file = event.target.files?.[0];
+  if (!file) return;
+
+  statusEl.className = 'backup-status loading';
+  statusEl.textContent = 'Importing...';
+
+  try {
+    const text = await file.text();
+    const data = JSON.parse(text);
+
+    if (!Array.isArray(data.folders) || !Array.isArray(data.notes)) {
+      throw new Error('Invalid backup file format');
+    }
+
+    for (const f of data.folders) {
+      if (!isSafeId(f.id)) {
+        throw new Error('Invalid backup file: unsafe folder ID');
+      }
+      if (f.parent_id !== null && f.parent_id !== undefined && !isSafeId(f.parent_id)) {
+        throw new Error('Invalid backup file: unsafe parent folder ID');
+      }
+    }
+    for (const n of data.notes) {
+      if (!isSafeId(n.id)) {
+        throw new Error('Invalid backup file: unsafe note ID');
+      }
+      if (!isSafeId(n.folder_id)) {
+        throw new Error('Invalid backup file: unsafe note folder ID');
+      }
+    }
+
+    await invoke('import_data', { folders: data.folders, notes: data.notes });
+
+    const existingFolderIds = new Set(state.data.folders.map(f => f.id));
+    const existingNoteIds = new Set(state.data.notes.map(n => n.id));
+
+    const newFolders = [];
+    for (const f of data.folders) {
+      if (existingFolderIds.has(f.id)) continue;
+      existingFolderIds.add(f.id);
+      newFolders.push({
+        id: f.id,
+        name: f.name,
+        createdAt: f.created_at,
+        parentId: f.parent_id || null
+      });
+    }
+
+    const newNotes = [];
+    for (const n of data.notes) {
+      if (existingNoteIds.has(n.id)) continue;
+      existingNoteIds.add(n.id);
+      const body = typeof n.body === 'string' ? n.body : '';
+      newNotes.push({
+        id: n.id,
+        folderId: n.folder_id,
+        title: n.title || '',
+        preview: body.slice(0, 200),
+        body,
+        createdAt: n.created_at,
+        updatedAt: n.updated_at,
+        pinned: n.pinned || 0,
+        sortOrder: n.sort_order || 0
+      });
+    }
+
+    state.data.folders = [...state.data.folders, ...newFolders];
+    state.data.notes = [...state.data.notes, ...newNotes];
+    rebuildIndexes();
+    render();
+
+    statusEl.className = 'backup-status success';
+    statusEl.textContent = `Imported ${newFolders.length} folders and ${newNotes.length} notes`;
+  } catch (e) {
+    statusEl.className = 'backup-status error';
+    statusEl.textContent = `Import failed: ${e}`;
+  }
+
+  event.target.value = '';
 }
 
 // ===== GLOBAL EVENT LISTENERS =====
@@ -1215,6 +1406,9 @@ window.startEditingFolder = startEditingFolder;
 window.finishEditingFolder = finishEditingFolder;
 window.handleFolderKeydown = handleFolderKeydown;
 window.deleteFolder = deleteFolder;
+window.toggleFolderExpanded = toggleFolderExpanded;
+window.toggleFolderMenu = toggleFolderMenu;
+window.closeFolderMenus = closeFolderMenus;
 window.showFolderContextMenu = showFolderContextMenu;
 window.closeContextMenu = closeContextMenu;
 window.addNote = addNote;
@@ -1227,9 +1421,10 @@ window.closeCommandPalette = closeCommandPalette;
 window.setCommandQuery = setCommandQuery;
 window.selectCommandResult = selectCommandResult;
 window.openSettingsModal = openSettingsModal;
-window.closeSettingsModal = closeSettingsModal;
-window.exportBackup = exportBackup;
-window.toggleSortMode = toggleSortMode;
+  window.closeSettingsModal = closeSettingsModal;
+  window.exportBackup = exportBackup;
+  window.importBackup = importBackup;
+  window.toggleSortMode = toggleSortMode;
 window.togglePinNote = togglePinNote;
 window.showNoteContextMenu = showNoteContextMenu;
 window.onNoteDragStart = onNoteDragStart;

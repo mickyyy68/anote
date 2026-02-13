@@ -15,6 +15,7 @@ export const state = {
   commandPaletteOpen: false,
   commandQuery: '',
   commandSelectedIndex: 0,
+  expandedFolders: new Set(),
   // In-memory indexes for O(1) lookups
   notesById: new Map(),
   foldersById: new Map(),
@@ -46,7 +47,7 @@ export const DataLayer = {
       const folders = await invoke('get_folders');
       const notes = await invoke('get_notes_metadata');
       state.data.folders = folders.map(f => ({
-        id: f.id, name: f.name, createdAt: f.created_at
+        id: f.id, name: f.name, createdAt: f.created_at, parentId: f.parent_id || null
       }));
       state.data.notes = notes.map(n => ({
         id: n.id, folderId: n.folder_id, title: n.title,
@@ -73,7 +74,7 @@ export async function migrateLocalStorage() {
     const data = JSON.parse(raw);
     if (data.folders && data.folders.length > 0) {
       const folders = data.folders.map(f => ({
-        id: f.id, name: f.name, created_at: f.createdAt
+        id: f.id, name: f.name, created_at: f.createdAt, parent_id: f.parentId || null
       }));
       const notes = (data.notes || []).map(n => ({
         id: n.id, folder_id: n.folderId, title: n.title || '',
