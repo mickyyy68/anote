@@ -8,6 +8,9 @@
     "build": "tauri build",
     "vite:dev": "vite",
     "vite:build": "vite build",
+    "raycast:dev": "bun run --cwd raycast dev",
+    "raycast:build": "bun run --cwd raycast build",
+    "raycast:typecheck": "bun run --cwd raycast typecheck",
     "test:perf": "bun run --cwd tests perf",
     "test:perf:ui": "bun run --cwd tests perf:ui",
     "test:perf:sample": "bun run --cwd tests perf:sample"

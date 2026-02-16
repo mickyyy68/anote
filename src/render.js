@@ -1,6 +1,6 @@
 import { invoke } from '@tauri-apps/api/core';
 import { icons } from './icons.js';
-import { state, loadTheme, saveTheme, generateId, formatDate, escapeHtml, rebuildIndexes } from './state.js';
+import { state, DataLayer, loadTheme, saveTheme, generateId, formatDate, escapeHtml, rebuildIndexes } from './state.js';
 import { createEditor, destroyEditor, focusEditor, getEditorView, updateFindHighlights } from './editor.js';
 import { TextSelection } from '@milkdown/prose/state';
 
@@ -16,6 +16,87 @@ const dirty = { sidebar: false, notesHeader: false, notesList: false };
 function markAllDirty() { dirty.sidebar = true; dirty.notesHeader = true; dirty.notesList = true; }
 function clearDirty() { dirty.sidebar = false; dirty.notesHeader = false; dirty.notesList = false; }
 function isDirtySet() { return dirty.sidebar || dirty.notesHeader || dirty.notesList; }
+
+let syncWatcherInitialized = false;
+let syncInFlight = false;
+let syncPollTimer = null;
+let lastSyncToken = 0;
+
+async function fetchSyncToken() {
+  try {
+    return await invoke('get_sync_token');
+  } catch {
+    return 0;
+  }
+}
+
+function normalizeSelectionAfterReload() {
+  // External mutations may delete/relocate active entities; clamp selection to valid IDs.
+  if (state.activeFolderId && !state.foldersById.has(state.activeFolderId)) {
+    state.activeFolderId = state.data.folders[0]?.id || null;
+  }
+
+  if (state.activeNoteId && !state.notesById.has(state.activeNoteId)) {
+    state.activeNoteId = null;
+  }
+
+  if (state.activeNoteId) {
+    const activeNote = state.notesById.get(state.activeNoteId);
+    if (activeNote) state.activeFolderId = activeNote.folderId;
+  }
+
+  if (state.activeFolderId && !state.activeNoteId) {
+    const folderNotes = getSortedFolderNotes(state.activeFolderId);
+    state.activeNoteId = folderNotes.length > 0 ? folderNotes[0].id : null;
+  }
+}
+
+async function syncFromDiskIfChanged({ force = false } = {}) {
+  if (syncInFlight) return;
+  syncInFlight = true;
+  try {
+    // Persist local debounce queue first so reload does not drop unsaved edits.
+    await flushPendingSavesAndWait();
+    // Read token only after local writes settle; otherwise we can compare against stale DB state.
+    const token = await fetchSyncToken();
+    if (!force && token === lastSyncToken) return;
+    await DataLayer.load();
+    normalizeSelectionAfterReload();
+    markAllDirty();
+    await render();
+    lastSyncToken = token;
+  } catch (e) {
+    console.error('External sync failed:', e);
+  } finally {
+    syncInFlight = false;
+  }
+}
+
+function triggerExternalSync() {
+  syncFromDiskIfChanged({ force: true });
+}
+
+export async function initExternalSyncWatcher() {
+  if (syncWatcherInitialized) return;
+  syncWatcherInitialized = true;
+  lastSyncToken = await fetchSyncToken();
+
+  const handleFocusSync = () => {
+    syncFromDiskIfChanged();
+  };
+
+  window.addEventListener('focus', handleFocusSync);
+  // Periodic poll keeps app state fresh while the window remains open in background workflows.
+  syncPollTimer = window.setInterval(() => {
+    syncFromDiskIfChanged();
+  }, 5000);
+  window.addEventListener('beforeunload', () => {
+    if (syncPollTimer) {
+      window.clearInterval(syncPollTimer);
+      syncPollTimer = null;
+    }
+  });
+}
 
 function getChildFolders(parentId) {
   return state.data.folders.filter(f => f.parentId === parentId);
@@ -1114,10 +1195,20 @@ function persistNote(note) {
   const key = note.id;
   const prev = lastSaved.get(key);
   // Include updatedAt in dedupe so timestamp-only updates still persist to SQLite.
-  if (prev && prev.title === note.title && prev.body === note.body && prev.updatedAt === note.updatedAt) return;
+  if (prev && prev.title === note.title && prev.body === note.body && prev.updatedAt === note.updatedAt) {
+    return Promise.resolve();
+  }
   lastSaved.set(key, { title: note.title, body: note.body, updatedAt: note.updatedAt });
-  invoke('update_note', {
+  return invoke('update_note', {
     id: note.id, title: note.title, body: note.body, updatedAt: note.updatedAt
+  }).catch((e) => {
+    const message = String(e || '').toLowerCase();
+    if (message.includes('conflict')) {
+      // Another writer won; refresh from disk so UI converges to canonical state.
+      triggerExternalSync();
+      return;
+    }
+    console.error('Failed to persist note:', e);
   });
 }
 
@@ -1141,6 +1232,23 @@ function flushPendingSaves() {
     }
   }
   saveTimeouts.clear();
+}
+
+async function flushPendingSavesAndWait() {
+  const writes = [];
+  for (const [id, timeout] of saveTimeouts) {
+    clearTimeout(timeout);
+    const note = state.notesById.get(id);
+    if (note) {
+      updateNoteCard(note);
+      writes.push(persistNote(note));
+    }
+  }
+  saveTimeouts.clear();
+  if (writes.length > 0) {
+    // Sync watcher only needs completion, not per-note failure propagation.
+    await Promise.allSettled(writes);
+  }
 }
 
 function updateNoteTitle(id, value) {

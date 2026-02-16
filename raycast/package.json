@@ -1,0 +1,42 @@
+{
+  "$schema": "https://www.raycast.com/schemas/extension.json",
+  "name": "anote",
+  "title": "anote",
+  "description": "Search, copy, and update anote notes from Raycast",
+  "icon": "assets/anote.png",
+  "author": "mike",
+  "license": "MIT",
+  "commands": [
+    {
+      "name": "search-notes",
+      "title": "Search Notes",
+      "description": "Search and copy notes",
+      "mode": "view"
+    },
+    {
+      "name": "create-note",
+      "title": "Create Note",
+      "description": "Create a note in Inbox",
+      "mode": "view"
+    }
+  ],
+  "permissions": [
+    "read-write-user-files",
+    "execute-api"
+  ],
+  "scripts": {
+    "dev": "ray develop",
+    "build": "ray build",
+    "lint": "ray lint",
+    "typecheck": "tsc --noEmit"
+  },
+  "dependencies": {
+    "@raycast/api": "^1.79.0",
+    "react": "19.0.0"
+  },
+  "devDependencies": {
+    "@types/node": "22.13.10",
+    "@types/react": "19.0.10",
+    "typescript": "^5.7.2"
+  }
+}

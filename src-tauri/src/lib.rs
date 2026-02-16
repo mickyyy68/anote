@@ -1,3 +1,5 @@
+mod db;
+
 use rusqlite::Connection;
 use serde::{Deserialize, Serialize};
 use std::sync::Mutex;
@@ -39,114 +41,6 @@ struct NoteMetadata {
     updated_at: i64,
     pinned: i32,
     sort_order: i32,
-}
-
-fn init_db(conn: &Connection) {
-    conn.execute_batch(
-        "
-        PRAGMA journal_mode = WAL;
-        PRAGMA synchronous = NORMAL;
-        PRAGMA cache_size = -2000;
-        PRAGMA foreign_keys = ON;
-        ",
-    )
-    .unwrap();
-    conn.execute_batch(
-        "
-        CREATE TABLE IF NOT EXISTS folders (
-            id TEXT PRIMARY KEY,
-            name TEXT NOT NULL,
-            created_at INTEGER NOT NULL
-        );
-
-        CREATE TABLE IF NOT EXISTS notes (
-            id TEXT PRIMARY KEY,
-            folder_id TEXT NOT NULL REFERENCES folders(id) ON DELETE CASCADE,
-            title TEXT NOT NULL DEFAULT '',
-            body TEXT NOT NULL DEFAULT '',
-            created_at INTEGER NOT NULL,
-            updated_at INTEGER NOT NULL
-        );
-
-        CREATE INDEX IF NOT EXISTS idx_notes_folder ON notes(folder_id);
-
-        CREATE VIRTUAL TABLE IF NOT EXISTS notes_fts USING fts5(
-            title, body, content=notes, content_rowid=rowid
-        );
-
-        CREATE TRIGGER IF NOT EXISTS notes_ai AFTER INSERT ON notes BEGIN
-            INSERT INTO notes_fts(rowid, title, body) VALUES (new.rowid, new.title, new.body);
-        END;
-
-        CREATE TRIGGER IF NOT EXISTS notes_ad AFTER DELETE ON notes BEGIN
-            INSERT INTO notes_fts(notes_fts, rowid, title, body) VALUES('delete', old.rowid, old.title, old.body);
-        END;
-
-        CREATE TRIGGER IF NOT EXISTS notes_au AFTER UPDATE ON notes BEGIN
-            INSERT INTO notes_fts(notes_fts, rowid, title, body) VALUES('delete', old.rowid, old.title, old.body);
-            INSERT INTO notes_fts(rowid, title, body) VALUES (new.rowid, new.title, new.body);
-        END;
-        ",
-    )
-    .unwrap();
-
-    // Versioned migrations using PRAGMA user_version
-    let version: i32 = conn
-        .pragma_query_value(None, "user_version", |r| r.get(0))
-        .unwrap_or(0);
-
-    if version < 1 {
-        // Add pinned and sort_order columns (skip if already present from old migration path)
-        let has_pinned: bool = conn.prepare("SELECT pinned FROM notes LIMIT 0").is_ok();
-        if !has_pinned {
-            conn.execute(
-                "ALTER TABLE notes ADD COLUMN pinned INTEGER NOT NULL DEFAULT 0",
-                [],
-            )
-            .unwrap();
-        }
-        let added_sort_order = if conn
-            .prepare("SELECT sort_order FROM notes LIMIT 0")
-            .is_err()
-        {
-            conn.execute(
-                "ALTER TABLE notes ADD COLUMN sort_order INTEGER NOT NULL DEFAULT 0",
-                [],
-            )
-            .unwrap();
-            true
-        } else {
-            false
-        };
-        if added_sort_order {
-            // Initialize sort_order from updated_at so existing notes keep their visual order
-            let _ = conn.execute_batch(
-                "
-                WITH ranked AS (
-                    SELECT id, ROW_NUMBER() OVER (PARTITION BY folder_id ORDER BY updated_at DESC) - 1 AS rn
-                    FROM notes
-                )
-                UPDATE notes SET sort_order = (SELECT rn FROM ranked WHERE ranked.id = notes.id)
-                ",
-            );
-        }
-        conn.pragma_update(None, "user_version", 1).unwrap();
-    }
-
-    if version < 2 {
-        let has_parent_id = conn
-            .prepare("SELECT parent_id FROM folders LIMIT 0")
-            .is_ok();
-        if !has_parent_id {
-            conn.execute(
-                "ALTER TABLE folders ADD COLUMN parent_id TEXT REFERENCES folders(id) ON DELETE SET NULL",
-                [],
-            )
-            .unwrap();
-        }
-        conn.pragma_update(None, "user_version", 2).unwrap();
-    }
-    // Future migrations: if version < 3 { ... conn.pragma_update(None, "user_version", 3).unwrap(); }
 }
 
 // ===== Folder commands =====
@@ -360,11 +254,26 @@ fn update_note(
     updated_at: i64,
 ) -> Result<(), String> {
     let conn = db.0.lock().map_err(|e| e.to_string())?;
-    conn.execute(
-        "UPDATE notes SET title = ?1, body = ?2, updated_at = ?3 WHERE id = ?4",
-        rusqlite::params![title, body, updated_at, id],
-    )
-    .map_err(|e| e.to_string())?;
+    // Guard against stale writes coming from external clients (e.g. Raycast bridge).
+    let rows = conn
+        .execute(
+            "UPDATE notes SET title = ?1, body = ?2, updated_at = ?3 WHERE id = ?4 AND updated_at <= ?3",
+            rusqlite::params![title, body, updated_at, &id],
+        )
+        .map_err(|e| e.to_string())?;
+    if rows == 0 {
+        let exists: i64 = conn
+            .query_row(
+                "SELECT COUNT(1) FROM notes WHERE id = ?1",
+                rusqlite::params![&id],
+                |row| row.get(0),
+            )
+            .map_err(|e| e.to_string())?;
+        if exists == 0 {
+            return Err("note not found".to_string());
+        }
+        return Err("conflict: stale note update rejected".to_string());
+    }
     Ok(())
 }
 
@@ -505,15 +414,30 @@ fn export_backup(db: State<Db>) -> Result<String, String> {
     Ok(file_path.to_string_lossy().to_string())
 }
 
+fn get_sync_token_from_conn(conn: &Connection) -> Result<i64, String> {
+    // A single monotonic-ish value used by the frontend to detect external DB mutations.
+    conn.query_row(
+        "SELECT MAX(
+            COALESCE((SELECT MAX(updated_at) FROM notes), 0),
+            COALESCE((SELECT MAX(created_at) FROM folders), 0)
+        )",
+        [],
+        |row| row.get(0),
+    )
+    .map_err(|e| e.to_string())
+}
+
+#[tauri::command]
+fn get_sync_token(db: State<Db>) -> Result<i64, String> {
+    let conn = db.0.lock().map_err(|e| e.to_string())?;
+    get_sync_token_from_conn(&conn)
+}
+
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
     tauri::Builder::default()
         .setup(|app| {
-            // Use ~/.anote/ as canonical data directory
-            let home = dirs::home_dir().expect("failed to get home directory");
-            let anote_dir = home.join(".anote");
-            std::fs::create_dir_all(&anote_dir).expect("failed to create ~/.anote/");
-            let db_path = anote_dir.join("anote.db");
+            let db_path = db::canonical_db_path().expect("failed to resolve canonical database path");
 
             // Migrate from old Tauri app data path if needed
             if !db_path.exists() {
@@ -525,8 +449,8 @@ pub fn run() {
                 }
             }
 
-            let conn = Connection::open(&db_path).expect("failed to open database");
-            init_db(&conn);
+            // Shared DB bootstrap guarantees schema parity with external writers (e.g. Raycast bridge).
+            let conn = db::open_initialized_db(&db_path).expect("failed to open/initialize database");
 
             app.manage(Db(Mutex::new(conn)));
 
@@ -555,6 +479,7 @@ pub fn run() {
             reorder_notes,
             import_data,
             export_backup,
+            get_sync_token,
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");
