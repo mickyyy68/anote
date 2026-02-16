@@ -71,7 +71,7 @@ src/
   state.js              ← state object, index Maps, DataLayer, utilities
   render.js             ← Selective render system, all action handlers, window.* exports
   icons.js              ← SVG icon string exports
-  editor.js             ← Milkdown Crepe wrapper (createEditor, destroyEditor, getMarkdown)
+  editor.js             ← Milkdown Crepe wrapper, ProseMirror plugins (find-highlight decorations)
   styles/
     theme.css            ← CSS variable definitions (light/dark)
     base.css             ← Reset, body, scrollbar, animations
@@ -84,6 +84,10 @@ src/
 **Render system:** `render()` is async and uses dirty flags to skip unchanged sections. The sidebar and notes list rebuild via `innerHTML` (safe, no persistent state). The editor panel only rebuilds when `activeNoteId` changes, preserving the Milkdown instance during typing. `updateNoteCard()` does targeted DOM patches for the active note's card preview.
 
 **Milkdown editor:** Uses `@milkdown/crepe` (batteries-included package). Supports headings, lists, checkboxes, bold/italic, code blocks, tables, blockquotes, horizontal rules. ImageBlock, Latex, and LinkTooltip features are disabled. The editor wrapper in `editor.js` includes a sequence counter to guard against race conditions during rapid note switching.
+
+**Adding ProseMirror plugins:** Import `$prose` from `@milkdown/utils` and primitives from `@milkdown/prose/state` and `@milkdown/prose/view` (transitive deps, do not add them to `package.json`). Define plugin instances at module level in `editor.js`. Register before `crepe.create()` via `crepe.editor.use($prose(() => plugin))`. Dispatch plugin transactions through `getEditorView()`. Follow the find-highlight plugin as the reference pattern.
+
+**Find bar DOM:** Never rebuild the find bar with `innerHTML` — it destroys the input and loses cursor position. Build once, then patch `textContent`/values on subsequent updates. Use `TextSelection.near()` + `scrollIntoView()` for navigating to ProseMirror positions, never manual `coordsAtPos`/`scrollTo`.
 
 **Tauri IPC:** Uses `import { invoke } from '@tauri-apps/api/core'` (not the global `__TAURI__`). Action functions are exposed on `window.*` for inline `onclick` handlers in the rendered HTML.
 
@@ -100,6 +104,7 @@ Tauri auto-converts JS camelCase params to Rust snake_case (e.g., `folderId` →
 - **Index Maps:** Use `state.notesById`/`foldersById` for lookups, never `.find()`. Keep Maps in sync at mutation sites or call `rebuildIndexes()`.
 - **Dirty flags:** Set `dirty.sidebar`/`notesHeader`/`notesList` before `render()`. Omit for full-layout changes.
 - **Per-note debounce:** Call `flushPendingSaves()` before switching note, folder, or on app close.
+- **Find bar cleanup:** Always call `closeFindBar()` before switching notes or folders — stale match positions will cause crashes.
 - **Code comments:** Add concise comments only where logic is non-obvious; skip comments for straightforward code.
 
 ### Key Config
@@ -107,3 +112,8 @@ Tauri auto-converts JS camelCase params to Rust snake_case (e.g., `folderId` →
 - `tauri.conf.json`: Vite dev server at `devUrl: "http://localhost:5173"`, `frontendDist: "../dist"` for production
 - `withGlobalTauri: false` — uses `@tauri-apps/api` ES module imports
 - SQLite database stored at `~/.anote/anote.db` (auto-migrates from old Tauri app data dir on first run)
+
+## Communication Style
+
+- When describing code changes or fixes, use a single-sentence summary. Only elaborate if asked.
+- At the end of each implementation, provide concise recommendations (one or more, as useful) that could improve future agent performance, including AGENTS.md rules, better commands/workflows, validation steps, or common pitfalls; present them as actionable suggestions, not questions, and skip filler when no meaningful recommendation exists.
