@@ -1,9 +1,39 @@
 import { Crepe } from '@milkdown/crepe';
+import { $prose } from '@milkdown/utils';
+import { Plugin, PluginKey } from '@milkdown/prose/state';
+import { Decoration, DecorationSet } from '@milkdown/prose/view';
 import '@milkdown/crepe/theme/common/style.css';
 import '@milkdown/crepe/theme/frame.css';
 
 let crepeInstance = null;
 let sequenceId = 0;
+
+// ProseMirror plugin for find-in-note highlight decorations
+const findHighlightPluginKey = new PluginKey('find-highlight');
+
+const findHighlightPlugin = new Plugin({
+  key: findHighlightPluginKey,
+  state: {
+    init() { return DecorationSet.empty; },
+    apply(tr, old) {
+      const meta = tr.getMeta(findHighlightPluginKey);
+      if (meta) {
+        const { matches, currentIndex } = meta;
+        if (!matches || matches.length === 0) return DecorationSet.empty;
+        const decos = matches.map((m, i) =>
+          Decoration.inline(m.from, m.to, {
+            class: i === currentIndex ? 'find-highlight-current' : 'find-highlight',
+          })
+        );
+        return DecorationSet.create(tr.doc, decos);
+      }
+      return old.map(tr.mapping, tr.doc);
+    },
+  },
+  props: {
+    decorations(state) { return findHighlightPluginKey.getState(state); },
+  },
+});
 
 export async function createEditor(container, markdown, onChange) {
   const currentSeq = ++sequenceId;
@@ -29,6 +59,8 @@ export async function createEditor(container, markdown, onChange) {
       },
     },
   });
+
+  crepe.editor.use($prose(() => findHighlightPlugin));
 
   let initialLoad = true;
 
@@ -72,9 +104,19 @@ export function focusEditor() {
     if (el) {
       el.focus();
     } else {
-      // Fallback: focus the ProseMirror contenteditable element
       const pm = document.querySelector('.milkdown .ProseMirror');
       if (pm) pm.focus();
     }
   }
+}
+
+export function getEditorView() {
+  return crepeInstance?.editor?.ctx?.get?.('editorView');
+}
+
+export function updateFindHighlights(matches, currentIndex) {
+  const view = getEditorView();
+  if (!view) return;
+  const tr = view.state.tr.setMeta(findHighlightPluginKey, { matches, currentIndex });
+  view.dispatch(tr);
 }

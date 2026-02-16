@@ -51,6 +51,7 @@
   --folder-icon-bg: rgba(184, 92, 56, 0.06);
   --scrollbar-thumb: rgba(44, 40, 37, 0.12);
   --scrollbar-thumb-hover: rgba(44, 40, 37, 0.2);
+  --accent-light: rgba(184, 92, 56, 0.15);
   --selection-bg: rgba(184, 92, 56, 0.12);
   --tooltip-bg: #2C2825;
   --tooltip-text: #F5F0E8;
@@ -75,6 +76,7 @@
   --folder-icon-bg: rgba(212, 132, 90, 0.08);
   --scrollbar-thumb: rgba(232, 226, 216, 0.1);
   --scrollbar-thumb-hover: rgba(232, 226, 216, 0.18);
+  --accent-light: rgba(212, 132, 90, 0.20);
   --selection-bg: rgba(212, 132, 90, 0.15);
   --tooltip-bg: #E8E2D8;
   --tooltip-text: #1A1816;

@@ -1,7 +1,8 @@
 import { invoke } from '@tauri-apps/api/core';
 import { icons } from './icons.js';
 import { state, loadTheme, saveTheme, generateId, formatDate, escapeHtml, rebuildIndexes } from './state.js';
-import { createEditor, destroyEditor, focusEditor } from './editor.js';
+import { createEditor, destroyEditor, focusEditor, getEditorView, updateFindHighlights } from './editor.js';
+import { TextSelection } from '@milkdown/prose/state';
 
 // Track which note the editor is currently showing
 let currentEditorNoteId = null;
@@ -473,6 +474,184 @@ function renderSidebar() {
   }
 }
 
+function renderFindBar() {
+  const editorPanel = document.querySelector('.editor-panel');
+  if (!editorPanel) return;
+
+  let findBar = document.getElementById('find-bar');
+
+  if (!state.findBarOpen) {
+    if (findBar) findBar.remove();
+    return;
+  }
+
+  const { findQuery, findMatches, findCurrentMatch } = state;
+  const count = findMatches.length;
+  const current = count > 0 ? findCurrentMatch + 1 : 0;
+
+  // Build once, then do targeted updates
+  if (!findBar) {
+    findBar = document.createElement('div');
+    findBar.id = 'find-bar';
+    findBar.className = 'find-bar';
+    findBar.innerHTML = `
+      <input type="text"
+             class="find-bar-input"
+             placeholder="Find in note..."
+             id="find-input" />
+      <span class="find-bar-count" id="find-count"></span>
+      <button class="find-bar-btn" onclick="navigateFindMatch(-1)" title="Previous (Shift+Enter)">
+        ${icons.chevronUp}
+      </button>
+      <button class="find-bar-btn" onclick="navigateFindMatch(1)" title="Next (Enter)">
+        ${icons.chevronDown}
+      </button>
+      <button class="find-bar-btn find-bar-close" onclick="closeFindBar()" title="Close (Esc)">
+        ${icons.x}
+      </button>
+    `;
+    const input = findBar.querySelector('#find-input');
+    input.addEventListener('input', (e) => setFindQuery(e.target.value));
+    input.addEventListener('keydown', (e) => handleFindBarKeydown(e));
+    editorPanel.appendChild(findBar);
+    input.focus();
+  }
+
+  // Targeted updates: count label and input value
+  const countEl = document.getElementById('find-count');
+  if (countEl) {
+    if (!findQuery.trim()) {
+      countEl.textContent = '';
+      countEl.style.display = 'none';
+    } else if (count === 0) {
+      countEl.textContent = 'No results';
+      countEl.style.display = '';
+      countEl.className = 'find-bar-count no-results';
+    } else {
+      countEl.textContent = `${current} / ${count}`;
+      countEl.style.display = '';
+      countEl.className = 'find-bar-count';
+    }
+  }
+
+  const input = document.getElementById('find-input');
+  if (input && input.value !== findQuery) {
+    input.value = findQuery;
+  }
+}
+
+function openFindBar() {
+  if (state.findBarOpen) {
+    document.getElementById('find-input')?.focus();
+    return;
+  }
+  state.findBarOpen = true;
+  state.findQuery = '';
+  state.findMatches = [];
+  state.findCurrentMatch = 0;
+  renderFindBar();
+  performFind('');
+}
+
+function closeFindBar() {
+  if (!state.findBarOpen) return;
+  state.findBarOpen = false;
+  state.findQuery = '';
+  state.findMatches = [];
+  state.findCurrentMatch = 0;
+  clearFindHighlights();
+  renderFindBar();
+}
+
+function setFindQuery(value) {
+  state.findQuery = value;
+  performFind(value);
+}
+
+function performFind(query) {
+  state.findMatches = [];
+  state.findCurrentMatch = 0;
+
+  if (!query.trim()) {
+    updateFindHighlights([], 0);
+    renderFindBar();
+    return;
+  }
+  
+  const editorView = getEditorView();
+  if (!editorView) return;
+  
+  const { state: pmState } = editorView;
+  const doc = pmState.doc;
+  const text = query.trim().toLowerCase();
+  
+  let matches = [];
+  
+  doc.descendants((node, pos) => {
+    if (node.isText && node.text) {
+      const nodeText = node.text.toLowerCase();
+      let start = 0;
+      while ((start = nodeText.indexOf(text, start)) !== -1) {
+        const from = pos + start;
+        const to = from + text.length;
+        matches.push({ from, to });
+        start += text.length;
+      }
+    }
+  });
+  
+  state.findMatches = matches;
+  if (matches.length > 0) {
+    state.findCurrentMatch = 0;
+    updateFindHighlights(matches, 0);
+    highlightFindMatch(0);
+  } else {
+    updateFindHighlights([], 0);
+  }
+  renderFindBar();
+}
+
+function navigateFindMatch(delta) {
+  const { findMatches } = state;
+  if (findMatches.length === 0) return;
+
+  const newIndex = (state.findCurrentMatch + delta + findMatches.length) % findMatches.length;
+  state.findCurrentMatch = newIndex;
+  updateFindHighlights(findMatches, newIndex);
+  highlightFindMatch(newIndex);
+  renderFindBar();
+}
+
+function highlightFindMatch(index) {
+  const { findMatches } = state;
+  if (index < 0 || index >= findMatches.length) return;
+
+  const editorView = getEditorView();
+  if (!editorView) return;
+
+  const { state: pmState, dispatch } = editorView;
+  const match = findMatches[index];
+  const resolved = pmState.doc.resolve(match.from);
+  const sel = TextSelection.near(resolved);
+  dispatch(pmState.tr.setSelection(sel).scrollIntoView());
+}
+
+function clearFindHighlights() {
+  updateFindHighlights([], 0);
+}
+
+function handleFindBarKeydown(e) {
+  if (e.key === 'Enter') {
+    e.preventDefault();
+    const delta = e.shiftKey ? -1 : 1;
+    navigateFindMatch(delta);
+  } else if (e.key === 'Escape') {
+    e.preventDefault();
+    closeFindBar();
+    focusEditor();
+  }
+}
+
 function renderNotesHeader() {
   const root = document.getElementById('notes-header-root');
   if (!root) return;
@@ -692,6 +871,11 @@ export async function render(options = {}) {
     if (currentEditorNoteId !== activeNoteId) {
       await renderEditorPanel(options.focusTitle);
     }
+
+    // Always render find bar if open (it's positioned absolutely in editor panel)
+    if (state.findBarOpen) {
+      renderFindBar();
+    }
   }
 
   clearDirty();
@@ -744,6 +928,7 @@ async function addFolder(parentId = null) {
 
 function selectFolder(id) {
   if (state.editingFolderId) return;
+  if (state.findBarOpen) closeFindBar();
   flushPendingSaves();
   state.activeFolderId = id;
   state.activeNoteId = null;
@@ -905,6 +1090,7 @@ async function addNote() {
 }
 
 function selectNote(id) {
+  if (state.findBarOpen) closeFindBar();
   flushPendingSaves();
   const prevId = state.activeNoteId;
   state.activeNoteId = id;
@@ -1355,6 +1541,23 @@ document.addEventListener('keydown', (e) => {
     return;
   }
 
+  if ((e.metaKey || e.ctrlKey) && e.key.toLowerCase() === 'f') {
+    e.preventDefault();
+    if (state.activeNoteId) openFindBar();
+    return;
+  }
+
+  if (state.findBarOpen) {
+    if (e.key === 'Escape') {
+      e.preventDefault();
+      closeFindBar();
+      focusEditor();
+      return;
+    }
+    // Let all other keys pass through to the find input
+    return;
+  }
+
   if (state.commandPaletteOpen) {
     if (e.key === 'ArrowDown') {
       e.preventDefault();
@@ -1421,10 +1624,15 @@ window.closeCommandPalette = closeCommandPalette;
 window.setCommandQuery = setCommandQuery;
 window.selectCommandResult = selectCommandResult;
 window.openSettingsModal = openSettingsModal;
-  window.closeSettingsModal = closeSettingsModal;
-  window.exportBackup = exportBackup;
-  window.importBackup = importBackup;
-  window.toggleSortMode = toggleSortMode;
+window.closeSettingsModal = closeSettingsModal;
+window.openFindBar = openFindBar;
+window.closeFindBar = closeFindBar;
+window.setFindQuery = setFindQuery;
+window.handleFindBarKeydown = handleFindBarKeydown;
+window.navigateFindMatch = navigateFindMatch;
+window.exportBackup = exportBackup;
+window.importBackup = importBackup;
+window.toggleSortMode = toggleSortMode;
 window.togglePinNote = togglePinNote;
 window.showNoteContextMenu = showNoteContextMenu;
 window.onNoteDragStart = onNoteDragStart;

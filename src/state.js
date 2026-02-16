@@ -15,6 +15,10 @@ export const state = {
   commandPaletteOpen: false,
   commandQuery: '',
   commandSelectedIndex: 0,
+  findBarOpen: false,
+  findQuery: '',
+  findMatches: [],
+  findCurrentMatch: 0,
   expandedFolders: new Set(),
   // In-memory indexes for O(1) lookups
   notesById: new Map(),
