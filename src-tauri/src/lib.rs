@@ -1,5 +1,6 @@
 mod db;
 mod bridge_cli;
+mod pdf;
 
 use rusqlite::Connection;
 use serde::{Deserialize, Serialize};
@@ -421,6 +422,19 @@ fn export_backup(db: State<Db>) -> Result<String, String> {
     Ok(file_path.to_string_lossy().to_string())
 }
 
+#[tauri::command]
+fn export_note_pdf(db: State<Db>, id: String, path: String) -> Result<(), String> {
+    let conn = db.0.lock().map_err(|e| e.to_string())?;
+    let (title, body): (String, String) = conn
+        .query_row(
+            "SELECT title, body FROM notes WHERE id = ?1",
+            rusqlite::params![&id],
+            |row| Ok((row.get(0)?, row.get(1)?)),
+        )
+        .map_err(|e| e.to_string())?;
+    pdf::generate_pdf(&title, &body, &path)
+}
+
 fn get_sync_token_from_conn(conn: &Connection) -> Result<i64, String> {
     // A single monotonic-ish value used by the frontend to detect external DB mutations.
     conn.query_row(
@@ -447,6 +461,7 @@ pub fn maybe_run_bridge_cli() -> bool {
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
     tauri::Builder::default()
+        .plugin(tauri_plugin_dialog::init())
         .setup(|app| {
             let db_path = db::canonical_db_path().expect("failed to resolve canonical database path");
 
@@ -491,6 +506,7 @@ pub fn run() {
             import_data,
             export_backup,
             get_sync_token,
+            export_note_pdf,
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");

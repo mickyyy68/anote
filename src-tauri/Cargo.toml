@@ -32,3 +32,6 @@ tauri-plugin-log = "2"
 rusqlite = { version = "0.32", features = ["bundled"] }
 dirs = "6"
 chrono = "0.4"
+comrak = "0.36"
+genpdf = "0.2"
+tauri-plugin-dialog = "2"

@@ -1,4 +1,5 @@
 import { invoke } from '@tauri-apps/api/core';
+import { save } from '@tauri-apps/plugin-dialog';
 import { icons } from './icons.js';
 import { state, DataLayer, loadTheme, saveTheme, generateId, formatDate, escapeHtml, rebuildIndexes } from './state.js';
 import { createEditor, destroyEditor, focusEditor, getEditorView, updateFindHighlights } from './editor.js';
@@ -1466,6 +1467,9 @@ function showNoteContextMenu(e, noteId) {
     <button class="context-menu-item" onclick="closeContextMenu(); togglePinNote('${noteId}')">
       ${icons.pin} ${pinLabel}
     </button>
+    <button class="context-menu-item" onclick="closeContextMenu(); exportNotePdf('${noteId}')">
+      ${icons.download} Export as PDF
+    </button>
     <div class="context-menu-separator"></div>
     <button class="context-menu-item danger" onclick="closeContextMenu(); deleteNote('${noteId}')">
       ${icons.trash} Delete note
@@ -1546,6 +1550,22 @@ async function exportBackup() {
   } catch (e) {
     statusEl.className = 'backup-status error';
     statusEl.textContent = `Export failed: ${e}`;
+  }
+}
+
+async function exportNotePdf(noteId) {
+  const note = state.notesById.get(noteId);
+  if (!note) return;
+  const defaultName = (note.title || 'Untitled').replace(/[/\\?%*:|"<>]/g, '_') + '.pdf';
+  const path = await save({
+    defaultPath: defaultName,
+    filters: [{ name: 'PDF', extensions: ['pdf'] }],
+  });
+  if (!path) return;
+  try {
+    await invoke('export_note_pdf', { id: noteId, path });
+  } catch (e) {
+    console.error('PDF export failed:', e);
   }
 }
 
@@ -1739,6 +1759,7 @@ window.setFindQuery = setFindQuery;
 window.handleFindBarKeydown = handleFindBarKeydown;
 window.navigateFindMatch = navigateFindMatch;
 window.exportBackup = exportBackup;
+window.exportNotePdf = exportNotePdf;
 window.importBackup = importBackup;
 window.toggleSortMode = toggleSortMode;
 window.togglePinNote = togglePinNote;
