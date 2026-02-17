@@ -1,19 +1,12 @@
 import { Action, ActionPanel, Form, Toast, showToast } from "@raycast/api";
 import { useState } from "react";
-import { BridgeError, createNoteViaBridge } from "./lib/bridge";
+import { bridgeErrorMessage, createNoteViaBridge } from "./lib/bridge";
 
 type CreateFormValues = {
   title: string;
   body: string;
   folderId?: string;
 };
-
-function bridgeErrorMessage(error: unknown): string {
-  if (error instanceof BridgeError) {
-    return `${error.code}: ${error.message}`;
-  }
-  return String(error || "Unknown error");
-}
 
 export default function CreateNoteCommand() {
   const [title, setTitle] = useState("");

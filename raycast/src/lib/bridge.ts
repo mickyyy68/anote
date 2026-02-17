@@ -17,8 +17,17 @@ export class BridgeError extends Error {
 
   constructor(code: string, message: string) {
     super(message);
+    this.name = "BridgeError";
     this.code = code;
+    Object.setPrototypeOf(this, BridgeError.prototype);
   }
+}
+
+export function bridgeErrorMessage(error: unknown): string {
+  if (error instanceof BridgeError) {
+    return `${error.code}: ${error.message}`;
+  }
+  return String(error || "Unknown error");
 }
 
 function resolveBridgeCommand() {
@@ -96,12 +105,25 @@ async function callBridge<T>(op: string, payload: unknown): Promise<T> {
   return parsed.data as T;
 }
 
+type RawCreateNoteResponse = {
+  id: string;
+  folder_id: string;
+  created_at: number;
+  updated_at: number;
+};
+
 export async function createNoteViaBridge(input: CreateNoteRequest): Promise<CreateNoteResponse> {
-  return callBridge<CreateNoteResponse>("create_note", {
+  const raw = await callBridge<RawCreateNoteResponse>("create_note", {
     title: input.title,
     body: input.body,
     folder_id: input.folderId,
   });
+  return {
+    id: raw.id,
+    folderId: raw.folder_id,
+    createdAt: raw.created_at,
+    updatedAt: raw.updated_at,
+  };
 }
 
 export async function updateNoteViaBridge(input: UpdateNoteRequest): Promise<void> {

@@ -12,7 +12,7 @@ import {
 } from "@raycast/api";
 import { useEffect, useMemo, useState } from "react";
 import { openAnoteApp } from "./lib/anote-app";
-import { BridgeError, updateNoteViaBridge } from "./lib/bridge";
+import { bridgeErrorMessage, updateNoteViaBridge } from "./lib/bridge";
 import { getReadonlyNoteById, searchNotesReadOnly } from "./lib/db";
 import type { ReadonlyNote, ReadonlyNoteSummary } from "./lib/types";
 
@@ -32,13 +32,6 @@ function detailMarkdown(item: ReadonlyNoteSummary, note: ReadonlyNote | null): s
   return `# ${title}\n\n${body || "_Empty note_"}`;
 }
 
-function bridgeErrorMessage(error: unknown): string {
-  if (error instanceof BridgeError) {
-    return `${error.code}: ${error.message}`;
-  }
-  return String(error || "Unknown error");
-}
-
 function UpdateNoteForm(props: {
   noteId: string;
   onUpdated: () => Promise<void>;
@@ -48,6 +41,7 @@ function UpdateNoteForm(props: {
   const [body, setBody] = useState("");
   const [isLoading, setIsLoading] = useState(true);
   const [isSaving, setIsSaving] = useState(false);
+  const [loadedUpdatedAt, setLoadedUpdatedAt] = useState<number | undefined>();
 
   useEffect(() => {
     let disposed = false;
@@ -58,6 +52,7 @@ function UpdateNoteForm(props: {
         if (!note || disposed) return;
         setTitle(note.title || "");
         setBody(note.body || "");
+        setLoadedUpdatedAt(note.updatedAt);
       } catch (error) {
         if (!disposed) {
           await showToast({
@@ -83,6 +78,7 @@ function UpdateNoteForm(props: {
         id: noteId,
         title: values.title,
         body: values.body,
+        updatedAt: loadedUpdatedAt,
       });
       await showToast({ style: Toast.Style.Success, title: "Note updated" });
       await onUpdated();

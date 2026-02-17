@@ -118,24 +118,47 @@ fn generate_id() -> String {
     format!("{:x}{:x}{:x}", t, pid, c)
 }
 
-fn ensure_inbox(conn: &Connection) -> Result<String, String> {
-    let mut stmt = conn
-        .prepare("SELECT id FROM folders WHERE name = 'Inbox' ORDER BY created_at ASC LIMIT 1")
+fn ensure_inbox(conn: &mut Connection) -> Result<String, String> {
+    // Use BEGIN IMMEDIATE to serialize concurrent bridge writers racing to create Inbox.
+    let tx = conn.transaction_with_behavior(rusqlite::TransactionBehavior::Immediate)
         .map_err(|e| e.to_string())?;
-    let existing: Result<String, _> = stmt.query_row([], |row| row.get(0));
+
+    let existing: Result<String, _> = tx.query_row(
+        "SELECT id FROM folders WHERE name = 'Inbox' ORDER BY created_at ASC LIMIT 1",
+        [],
+        |row| row.get(0),
+    );
     if let Ok(id) = existing {
+        tx.commit().map_err(|e| e.to_string())?;
         return Ok(id);
     }
 
-    // Create lazily so first write from Raycast has a deterministic target folder.
+    // INSERT OR IGNORE backed by idx_folders_name_root partial unique index.
     let id = generate_id();
     let created_at = now_ms();
-    conn.execute(
-        "INSERT INTO folders (id, name, created_at, parent_id) VALUES (?1, 'Inbox', ?2, NULL)",
+    tx.execute(
+        "INSERT OR IGNORE INTO folders (id, name, created_at, parent_id, updated_at) VALUES (?1, 'Inbox', ?2, NULL, ?2)",
         params![&id, created_at],
     )
     .map_err(|e| e.to_string())?;
-    Ok(id)
+
+    // Re-query to handle the case where another writer won the race.
+    let final_id: String = tx.query_row(
+        "SELECT id FROM folders WHERE name = 'Inbox' ORDER BY created_at ASC LIMIT 1",
+        [],
+        |row| row.get(0),
+    )
+    .map_err(|e| e.to_string())?;
+
+    tx.commit().map_err(|e| e.to_string())?;
+    Ok(final_id)
+}
+
+fn escape_like(input: &str) -> String {
+    input
+        .replace('\\', "\\\\")
+        .replace('%', "\\%")
+        .replace('_', "\\_")
 }
 
 fn is_safe_id(id: &str) -> bool {
@@ -150,7 +173,7 @@ fn create_note(conn: &mut Connection, payload: CreateNotePayload) -> Result<Valu
             }
             id
         }
-        None => ensure_inbox(conn).map_err(|e| err("INTERNAL", e))?,
+        None => ensure_inbox(&mut *conn).map_err(|e| err("INTERNAL", e))?,
     };
 
     let folder_exists: i64 = conn
@@ -290,13 +313,13 @@ fn search_notes(conn: &Connection, payload: SearchNotesPayload) -> Result<Value,
         Ok(rows) => Ok(json!({ "notes": rows })),
         Err(_) => {
             // FTS syntax can fail on malformed user input; degrade to LIKE search instead of hard-failing.
-            let like = format!("%{}%", query);
+            let like = format!("%{}%", escape_like(&query));
             let mut fallback_stmt = conn
                 .prepare(
                     "SELECT n.id, n.folder_id, n.title, substr(n.body, 1, 200), n.updated_at, COALESCE(f.name, '')
                      FROM notes n
                      LEFT JOIN folders f ON f.id = n.folder_id
-                     WHERE n.title LIKE ?1 OR n.body LIKE ?1
+                     WHERE n.title LIKE ?1 ESCAPE '\\' OR n.body LIKE ?1 ESCAPE '\\'
                      ORDER BY n.updated_at DESC
                      LIMIT ?2",
                 )
@@ -380,7 +403,7 @@ fn main() {
 
     // Keep operation dispatch explicit and small; unknown ops are validation errors by contract.
     let response = match req.op.as_str() {
-        "ensure_inbox" => match ensure_inbox(&conn) {
+        "ensure_inbox" => match ensure_inbox(&mut conn) {
             Ok(folder_id) => ok(json!({ "folder_id": folder_id })),
             Err(e) => err("INTERNAL", e),
         },

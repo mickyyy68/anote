@@ -5,7 +5,7 @@
     "": {
       "name": "anote",
       "dependencies": {
-        "@raycast/api": "^1.79.0",
+        "@raycast/api": "^1.94.0",
         "react": "19.0.0",
       },
       "devDependencies": {

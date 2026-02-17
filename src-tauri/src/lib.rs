@@ -13,6 +13,8 @@ struct Folder {
     name: String,
     created_at: i64,
     parent_id: Option<String>,
+    #[serde(default)]
+    updated_at: i64,
 }
 
 #[derive(Serialize, Deserialize, Clone)]
@@ -49,7 +51,7 @@ struct NoteMetadata {
 fn get_folders(db: State<Db>) -> Result<Vec<Folder>, String> {
     let conn = db.0.lock().map_err(|e| e.to_string())?;
     let mut stmt = conn
-        .prepare("SELECT id, name, created_at, parent_id FROM folders ORDER BY created_at")
+        .prepare("SELECT id, name, created_at, parent_id, COALESCE(updated_at, created_at) FROM folders ORDER BY created_at")
         .map_err(|e| e.to_string())?;
     let folders = stmt
         .query_map([], |row| {
@@ -58,6 +60,7 @@ fn get_folders(db: State<Db>) -> Result<Vec<Folder>, String> {
                 name: row.get(1)?,
                 created_at: row.get(2)?,
                 parent_id: row.get(3)?,
+                updated_at: row.get(4)?,
             })
         })
         .map_err(|e| e.to_string())?
@@ -76,7 +79,7 @@ fn create_folder(
 ) -> Result<(), String> {
     let conn = db.0.lock().map_err(|e| e.to_string())?;
     conn.execute(
-        "INSERT INTO folders (id, name, created_at, parent_id) VALUES (?1, ?2, ?3, ?4)",
+        "INSERT INTO folders (id, name, created_at, parent_id, updated_at) VALUES (?1, ?2, ?3, ?4, ?3)",
         rusqlite::params![id, name, created_at, parent_id],
     )
     .map_err(|e| e.to_string())?;
@@ -86,9 +89,10 @@ fn create_folder(
 #[tauri::command]
 fn rename_folder(db: State<Db>, id: String, name: String) -> Result<(), String> {
     let conn = db.0.lock().map_err(|e| e.to_string())?;
+    let now = chrono::Local::now().timestamp_millis();
     conn.execute(
-        "UPDATE folders SET name = ?1 WHERE id = ?2",
-        rusqlite::params![name, id],
+        "UPDATE folders SET name = ?1, updated_at = ?3 WHERE id = ?2",
+        rusqlite::params![name, id, now],
     )
     .map_err(|e| e.to_string())?;
     Ok(())
@@ -331,9 +335,10 @@ fn import_data(db: State<Db>, folders: Vec<Folder>, notes: Vec<Note>) -> Result<
     let mut conn = db.0.lock().map_err(|e| e.to_string())?;
     let tx = conn.transaction().map_err(|e| e.to_string())?;
     for folder in &folders {
+        let updated = if folder.updated_at != 0 { folder.updated_at } else { folder.created_at };
         tx.execute(
-            "INSERT OR IGNORE INTO folders (id, name, created_at, parent_id) VALUES (?1, ?2, ?3, ?4)",
-            rusqlite::params![folder.id, folder.name, folder.created_at, folder.parent_id],
+            "INSERT OR IGNORE INTO folders (id, name, created_at, parent_id, updated_at) VALUES (?1, ?2, ?3, ?4, ?5)",
+            rusqlite::params![folder.id, folder.name, folder.created_at, folder.parent_id, updated],
         )
         .map_err(|e| e.to_string())?;
     }
@@ -356,7 +361,7 @@ fn export_backup(db: State<Db>) -> Result<String, String> {
 
     // Query all folders
     let mut folder_stmt = conn
-        .prepare("SELECT id, name, created_at, parent_id FROM folders ORDER BY created_at")
+        .prepare("SELECT id, name, created_at, parent_id, COALESCE(updated_at, created_at) FROM folders ORDER BY created_at")
         .map_err(|e| e.to_string())?;
     let folders: Vec<serde_json::Value> = folder_stmt
         .query_map([], |row| {
@@ -364,7 +369,8 @@ fn export_backup(db: State<Db>) -> Result<String, String> {
                 "id": row.get::<_, String>(0)?,
                 "name": row.get::<_, String>(1)?,
                 "created_at": row.get::<_, i64>(2)?,
-                "parent_id": row.get::<_, Option<String>>(3)?
+                "parent_id": row.get::<_, Option<String>>(3)?,
+                "updated_at": row.get::<_, i64>(4)?
             }))
         })
         .map_err(|e| e.to_string())?
@@ -419,7 +425,7 @@ fn get_sync_token_from_conn(conn: &Connection) -> Result<i64, String> {
     conn.query_row(
         "SELECT MAX(
             COALESCE((SELECT MAX(updated_at) FROM notes), 0),
-            COALESCE((SELECT MAX(created_at) FROM folders), 0)
+            COALESCE((SELECT MAX(COALESCE(updated_at, created_at)) FROM folders), 0)
         )",
         [],
         |row| row.get(0),

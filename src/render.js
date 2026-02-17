@@ -1203,7 +1203,7 @@ function persistNote(note) {
     id: note.id, title: note.title, body: note.body, updatedAt: note.updatedAt
   }).catch((e) => {
     const message = String(e || '').toLowerCase();
-    if (message.includes('conflict')) {
+    if (message.startsWith('conflict')) {
       // Another writer won; refresh from disk so UI converges to canonical state.
       triggerExternalSync();
       return;

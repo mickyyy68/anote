@@ -27,9 +27,9 @@ export type CreateNoteRequest = {
 
 export type CreateNoteResponse = {
   id: string;
-  folder_id: string;
-  created_at: number;
-  updated_at: number;
+  folderId: string;
+  createdAt: number;
+  updatedAt: number;
 };
 
 export type UpdateNoteRequest = {

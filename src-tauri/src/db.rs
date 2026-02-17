@@ -95,7 +95,7 @@ pub fn init_db(conn: &Connection) -> Result<(), String> {
             false
         };
         if added_sort_order {
-            let _ = conn.execute_batch(
+            conn.execute_batch(
                 "
                 WITH ranked AS (
                     SELECT id, ROW_NUMBER() OVER (PARTITION BY folder_id ORDER BY updated_at DESC) - 1 AS rn
@@ -103,7 +103,8 @@ pub fn init_db(conn: &Connection) -> Result<(), String> {
                 )
                 UPDATE notes SET sort_order = (SELECT rn FROM ranked WHERE ranked.id = notes.id)
                 ",
-            );
+            )
+            .map_err(|e| e.to_string())?;
         }
         conn.pragma_update(None, "user_version", 1)
             .map_err(|e| e.to_string())?;
@@ -119,6 +120,25 @@ pub fn init_db(conn: &Connection) -> Result<(), String> {
             .map_err(|e| e.to_string())?;
         }
         conn.pragma_update(None, "user_version", 2)
+            .map_err(|e| e.to_string())?;
+    }
+
+    if version < 3 {
+        let has_col = conn.prepare("SELECT updated_at FROM folders LIMIT 0").is_ok();
+        if !has_col {
+            conn.execute("ALTER TABLE folders ADD COLUMN updated_at INTEGER", [])
+                .map_err(|e| e.to_string())?;
+        }
+        conn.execute_batch("UPDATE folders SET updated_at = created_at WHERE updated_at IS NULL")
+            .map_err(|e| e.to_string())?;
+
+        // Prevent duplicate root-level folders (safety net for ensure_inbox race)
+        conn.execute_batch(
+            "CREATE UNIQUE INDEX IF NOT EXISTS idx_folders_name_root ON folders(name) WHERE parent_id IS NULL",
+        )
+        .map_err(|e| e.to_string())?;
+
+        conn.pragma_update(None, "user_version", 3)
             .map_err(|e| e.to_string())?;
     }
 
