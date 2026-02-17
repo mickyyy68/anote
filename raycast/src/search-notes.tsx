@@ -1,4 +1,5 @@
 import {
+  Alert,
   Action,
   ActionPanel,
   Clipboard,
@@ -7,12 +8,13 @@ import {
   Keyboard,
   List,
   Toast,
+  confirmAlert,
   popToRoot,
   showToast,
 } from "@raycast/api";
 import { useEffect, useMemo, useState } from "react";
 import { openAnoteApp } from "./lib/anote-app";
-import { bridgeErrorMessage, updateNoteViaBridge } from "./lib/bridge";
+import { BridgeError, bridgeErrorMessage, deleteNoteViaBridge, updateNoteViaBridge } from "./lib/bridge";
 import { getReadonlyNoteById, searchNotesReadOnly } from "./lib/db";
 import type { ReadonlyNote, ReadonlyNoteSummary } from "./lib/types";
 
@@ -209,6 +211,42 @@ export default function SearchNotesCommand() {
     setReloadSeq((value) => value + 1);
   }
 
+  async function deleteNote(item: ReadonlyNoteSummary) {
+    const confirmed = await confirmAlert({
+      title: "Delete this note?",
+      message: "This permanently deletes the note and cannot be undone.",
+      primaryAction: {
+        title: "Delete",
+        style: Alert.ActionStyle.Destructive,
+      },
+    });
+    if (!confirmed) return;
+
+    try {
+      const loadedUpdatedAt = selectedNote?.id === item.id ? selectedNote.updatedAt : undefined;
+      await deleteNoteViaBridge({
+        id: item.id,
+        updatedAt: loadedUpdatedAt ?? item.updatedAt,
+      });
+      await showToast({ style: Toast.Style.Success, title: "Note deleted" });
+      await reloadData();
+    } catch (error) {
+      let message = bridgeErrorMessage(error);
+      if (error instanceof BridgeError) {
+        if (error.code === "CONFLICT") {
+          message = "Note changed elsewhere; refresh and try again.";
+        } else if (error.code === "VALIDATION") {
+          message = "Note no longer exists or request is invalid.";
+        }
+      }
+      await showToast({
+        style: Toast.Style.Failure,
+        title: "Failed to delete note",
+        message,
+      });
+    }
+  }
+
   return (
     <List
       isLoading={isLoading}
@@ -253,6 +291,12 @@ export default function SearchNotesCommand() {
                   title="Update Note"
                   icon={Icon.Pencil}
                   target={<UpdateNoteForm noteId={item.id} onUpdated={reloadData} />}
+                />
+                <Action
+                  title="Delete Note"
+                  icon={Icon.Trash}
+                  style={Action.Style.Destructive}
+                  onAction={() => deleteNote(item)}
                 />
                 <Action title="Open anote" icon={Icon.AppWindow} onAction={launchAnote} />
               </ActionPanel>

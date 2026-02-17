@@ -20,6 +20,22 @@
       "mode": "view"
     }
   ],
+  "preferences": [
+    {
+      "name": "bridgeBinaryPath",
+      "type": "textfield",
+      "required": false,
+      "title": "Bridge Binary Path",
+      "description": "Absolute path to anote_bridge executable"
+    },
+    {
+      "name": "bridgeRepoRoot",
+      "type": "directory",
+      "required": false,
+      "title": "Bridge Repo Root",
+      "description": "Path to the anote repository root (containing src-tauri)"
+    }
+  ],
   "permissions": [
     "read-write-user-files",
     "execute-api"
@@ -28,7 +44,8 @@
     "dev": "ray develop",
     "build": "ray build",
     "lint": "ray lint",
-    "typecheck": "tsc --noEmit"
+    "typecheck": "tsc --noEmit",
+    "test": "bun test"
   },
   "dependencies": {
     "@raycast/api": "^1.94.0",

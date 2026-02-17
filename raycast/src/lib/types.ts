@@ -38,3 +38,8 @@ export type UpdateNoteRequest = {
   body: string;
   updatedAt?: number;
 };
+
+export type DeleteNoteRequest = {
+  id: string;
+  updatedAt?: number;
+};

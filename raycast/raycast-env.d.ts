@@ -7,7 +7,12 @@
 
 /* eslint-disable @typescript-eslint/ban-types */
 
-type ExtensionPreferences = {}
+type ExtensionPreferences = {
+  /** Bridge Binary Path - Absolute path to anote_bridge executable */
+  "bridgeBinaryPath"?: string,
+  /** Bridge Repo Root - Path to the anote repository root (containing src-tauri) */
+  "bridgeRepoRoot"?: string
+}
 
 /** Preferences accessible in all the extension's commands */
 declare type Preferences = ExtensionPreferences

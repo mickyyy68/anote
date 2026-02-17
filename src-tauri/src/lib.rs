@@ -1,4 +1,5 @@
 mod db;
+mod bridge_cli;
 
 use rusqlite::Connection;
 use serde::{Deserialize, Serialize};
@@ -437,6 +438,10 @@ fn get_sync_token_from_conn(conn: &Connection) -> Result<i64, String> {
 fn get_sync_token(db: State<Db>) -> Result<i64, String> {
     let conn = db.0.lock().map_err(|e| e.to_string())?;
     get_sync_token_from_conn(&conn)
+}
+
+pub fn maybe_run_bridge_cli() -> bool {
+    bridge_cli::maybe_run_from_args()
 }
 
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
