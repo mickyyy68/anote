@@ -18,6 +18,12 @@
       "title": "Create Note",
       "description": "Create a note in Inbox",
       "mode": "view"
+    },
+    {
+      "name": "quick-note",
+      "title": "Quick Note",
+      "description": "Quickly create a note with clipboard paste support",
+      "mode": "view"
     }
   ],
   "preferences": [
