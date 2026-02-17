@@ -3,6 +3,7 @@
   "productName": "anote",
   "version": "0.1.0",
   "identifier": "com.anote.app",
+  "mainBinaryName": "anote",
   "build": {
     "beforeDevCommand": "bun run vite:dev",
     "beforeBuildCommand": "bun run vite:build",

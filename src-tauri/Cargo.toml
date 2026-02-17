@@ -4,12 +4,21 @@ version = "0.1.0"
 description = "A note-taking app"
 edition = "2021"
 rust-version = "1.77.2"
+default-run = "anote"
 
 # See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
 
 [lib]
 name = "anote_lib"
 crate-type = ["staticlib", "cdylib", "rlib"]
+
+[[bin]]
+name = "anote"
+path = "src/main.rs"
+
+[[bin]]
+name = "anote_bridge"
+path = "src/bin/anote_bridge.rs"
 
 [build-dependencies]
 tauri-build = { version = "2.5.4", features = [] }

@@ -18,6 +18,14 @@ cd src-tauri && cargo check    # Type-check without building
 cd src-tauri && cargo build    # Full debug build
 ```
 
+Raycast extension commands:
+```bash
+cd raycast && bun install
+bun run raycast:typecheck
+cd raycast && bun run dev
+cargo build --manifest-path src-tauri/Cargo.toml --bin anote_bridge
+```
+
 No unit/integration test framework or linting is configured.
 A performance harness is configured under `tests/`.
 
@@ -48,6 +56,20 @@ Prefer hand-written code over adding dependencies. Small utilities, UI patterns,
 ## Architecture
 
 Tauri v2 desktop app: Rust backend + Vite-bundled modular frontend with Milkdown markdown editor.
+
+### Raycast Extension
+
+Code lives in `raycast/` and is macOS-targeted.
+
+- **Read path:** Raycast read/search flows may query `~/.anote/anote.db` directly.
+- **Write path:** Raycast create/update/delete flows must go through `anote_bridge` (`src-tauri/src/bin/anote_bridge.rs`), not direct extension-side SQLite writes.
+- **Bridge protocol:** One JSON request on stdin and one JSON response on stdout.
+- **Supported ops:** `ensure_inbox`, `create_note`, `update_note`, `delete_note`, `search_notes`, `get_note`.
+- **Bridge resolution order:** `ANOTE_BRIDGE_BIN` env var, then Raycast preference `bridgeBinaryPath`, then installed-app bridge binary (`anote_bridge`) auto-discovery, then installed main app binary (`anote --bridge-cli`) auto-discovery, then repo-root `src-tauri/target/debug/anote_bridge` auto-discovery (optionally seeded by preference `bridgeRepoRoot`), then cargo fallback (`~/.cargo/bin/cargo` when present) when a manifest path is discoverable.
+- **Permissions:** Raycast manifest must include `read-write-user-files` and `execute-api`.
+- **Consistency contract:** Keep app sync-token polling and stale-write conflict guards aligned with bridge behavior; when changing these paths, add brief rationale comments.
+- **Docs sync rule:** If bridge ops, error codes, resolution order, or write-path behavior changes, update both `raycast/README.md` and this Raycast section in the same commit.
+- **Validation checklist:** Run `cd src-tauri && cargo check`, `cd src-tauri && cargo check --bin anote_bridge`, `bun run raycast:typecheck`, then manually verify search, copy, create, update, and delete flows in Raycast dev mode.
 
 ### Data Flow
 
@@ -106,6 +128,7 @@ Tauri auto-converts JS camelCase params to Rust snake_case (e.g., `folderId` →
 - **Per-note debounce:** Call `flushPendingSaves()` before switching note, folder, or on app close.
 - **Find bar cleanup:** Always call `closeFindBar()` before switching notes or folders — stale match positions will cause crashes.
 - **Code comments:** Add concise comments only where logic is non-obvious; skip comments for straightforward code.
+- **Cross-process consistency comments:** When adding/changing sync tokens, conflict guards, external writers, or fallback query paths, include brief rationale comments explaining why the consistency behavior exists.
 
 ### Key Config
 
