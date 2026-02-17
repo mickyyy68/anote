@@ -19,7 +19,7 @@ export default function QuickNoteCommand() {
         setBody(clipboardContent);
       } else {
         await showToast({
-          style: Toast.Style.Animated,
+          style: Toast.Style.Failure,
           title: "Clipboard is empty",
         });
       }
