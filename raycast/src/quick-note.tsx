@@ -33,11 +33,20 @@ export default function QuickNoteCommand() {
   }
 
   async function submit(values: QuickNoteFormValues) {
+    if (!values.body.trim()) {
+      await showToast({
+        style: Toast.Style.Failure,
+        title: "No note content",
+        message: "Please enter or paste content",
+      });
+      return;
+    }
+
     setIsLoading(true);
     try {
       const result = await createNoteViaBridge({
         title: values.title || "",
-        body: values.body || "",
+        body: values.body.trim(),
       });
 
       await showToast({
