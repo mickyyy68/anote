@@ -25,8 +25,8 @@ export default function VoiceNoteCommand() {
     setIsLoading(true);
     try {
       const result = await createNoteViaBridge({
-        title: values.title || "",
-        body: values.body,
+        title: values.title?.trim() || "",
+        body: values.body.trim(),
       });
 
       await showToast({

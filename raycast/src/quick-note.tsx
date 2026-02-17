@@ -45,7 +45,7 @@ export default function QuickNoteCommand() {
     setIsLoading(true);
     try {
       const result = await createNoteViaBridge({
-        title: values.title || "",
+        title: values.title?.trim() || "",
         body: values.body.trim(),
       });
 
