@@ -85,6 +85,7 @@ Write commands use this resolution order:
 - `Search Notes`: search/view/copy notes and open update/delete forms
 - `Create Note`: create notes (defaults to `Inbox` if no folder ID is provided)
 - `Quick Note`: quickly create a note with clipboard paste support
+- `Voice Note`: create a note using voice input
 
 ## Required Environment
 
