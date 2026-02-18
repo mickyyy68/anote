@@ -1783,17 +1783,22 @@ async function toggleNoteTag(noteId, tagId) {
     }
     state.noteTags.set(noteId, noteTagSet);
     
-    // Rebuild notesByTagId index
-    state.notesByTagId.clear();
-    for (const [nid, tids] of state.noteTags) {
-      for (const tid of tids) {
-        if (!state.notesByTagId.has(tid)) {
-          state.notesByTagId.set(tid, []);
+    // Incrementally update notesByTagId
+    const note = state.notesById.get(noteId);
+    if (note) {
+      if (hasTag) {
+        // Removed tag - remove note from that tag's list
+        const list = state.notesByTagId.get(tagId);
+        if (list) {
+          const idx = list.findIndex(n => n.id === noteId);
+          if (idx !== -1) list.splice(idx, 1);
         }
-        const note = state.notesById.get(nid);
-        if (note) {
-          state.notesByTagId.get(tid).push(note);
+      } else {
+        // Added tag - add note to that tag's list
+        if (!state.notesByTagId.has(tagId)) {
+          state.notesByTagId.set(tagId, []);
         }
+        state.notesByTagId.get(tagId).push(note);
       }
     }
     

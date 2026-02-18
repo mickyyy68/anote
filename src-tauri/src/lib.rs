@@ -218,7 +218,11 @@ fn update_folder(db: State<Db>, id: String, name: Option<String>, parent_id: Opt
         }
         // Check for circular reference (parent is a descendant of this folder)
         let mut current = Some(pid.clone());
+        let mut seen = std::collections::HashSet::new();
         while let Some(curr) = current {
+            if !seen.insert(curr.clone()) {
+                return Err("existing folder hierarchy contains a cycle".to_string());
+            }
             if curr == id {
                 return Err("cannot create circular folder reference".to_string());
             }
@@ -569,17 +573,16 @@ fn export_note_markdown(db: State<Db>, id: String, path: String) -> Result<(), S
         }
     }
 
-    // Get note from database
-    let mut conn = db.0.lock().map_err(|e| e.to_string())?;
-    let note: (String, String) = conn
-        .query_row(
+    // Get note from database (narrow mutex scope to just the query)
+    let (title, body): (String, String) = {
+        let conn = db.0.lock().map_err(|e| e.to_string())?;
+        conn.query_row(
             "SELECT title, body FROM notes WHERE id = ?1",
             rusqlite::params![id],
             |row| Ok((row.get(0)?, row.get(1)?)),
         )
-        .map_err(|e| e.to_string())?;
-    
-    let (title, body) = note;
+        .map_err(|e| e.to_string())?
+    };
 
     // Format the markdown file with title as header
     let markdown = format!("# {}\n\n{}", title, body);
