@@ -12,6 +12,7 @@ This file contains tasks for nighttime autonomous development on the Anote proje
 - **PR #1**: Raycast extension with bridge-backed writes + sync hardening (merged)
 - **PR #4**: Quick Note & Voice Note commands for Raycast (in progress)
 - **PR #5**: Export Markdown feature (completed 2026-02-18)
+- **PR #6**: Favorites feature (completed 2026-02-18)
 
 ## Features to Implement
 
@@ -129,7 +130,7 @@ ALTER TABLE notes ADD COLUMN starred INTEGER NOT NULL DEFAULT 0;
 - [x] Export Markdown (completed 2026-02-18)
 - [x] Nested folders UI (completed 2026-02-18)
 - [x] Note templates (completed 2026-02-18)
-- [ ] Favorites (not started)
+- [x] Favorites (completed 2026-02-18)
 - [ ] Keyboard shortcuts (not started)
 
 ## Notes
