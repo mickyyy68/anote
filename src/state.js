@@ -4,7 +4,7 @@ const STORAGE_KEY = 'anote_data';
 const THEME_KEY = 'anote_theme';
 
 export const state = {
-  data: { folders: [], notes: [] },
+  data: { folders: [], notes: [], templates: [] },
   activeFolderId: null,
   activeNoteId: null,
   editingFolderId: null,
@@ -20,6 +20,8 @@ export const state = {
   findMatches: [],
   findCurrentMatch: 0,
   expandedFolders: new Set(),
+  templatesModalOpen: false,
+  editingTemplateId: null,
   // In-memory indexes for O(1) lookups
   notesById: new Map(),
   foldersById: new Map(),
@@ -50,6 +52,7 @@ export const DataLayer = {
     try {
       const folders = await invoke('get_folders');
       const notes = await invoke('get_notes_metadata');
+      const templates = await invoke('get_templates');
       state.data.folders = folders.map(f => ({
         id: f.id, name: f.name, createdAt: f.created_at, parentId: f.parent_id || null
       }));
@@ -59,10 +62,14 @@ export const DataLayer = {
         createdAt: n.created_at, updatedAt: n.updated_at,
         pinned: n.pinned || 0, sortOrder: n.sort_order || 0
       }));
+      state.data.templates = templates.map(t => ({
+        id: t.id, name: t.name, content: t.content,
+        category: t.category, createdAt: t.created_at
+      }));
       rebuildIndexes();
     } catch (e) {
       console.error('Failed to load data:', e);
-      state.data = { folders: [], notes: [] };
+      state.data = { folders: [], notes: [], templates: [] };
       state.notesById.clear();
       state.foldersById.clear();
       state.notesByFolderId.clear();
@@ -75,6 +82,39 @@ export const DataLayer = {
       await invoke('export_note_markdown', { id: noteId, path });
     } catch (e) {
       console.error('Failed to export note as Markdown:', e);
+      throw e;
+    }
+  },
+
+  async createTemplate(id, name, content, category, createdAt) {
+    try {
+      await invoke('create_template', { id, name, content, category, createdAt });
+      state.data.templates.push({ id, name, content, category, createdAt });
+    } catch (e) {
+      console.error('Failed to create template:', e);
+      throw e;
+    }
+  },
+
+  async updateTemplate(id, name, content, category) {
+    try {
+      await invoke('update_template', { id, name, content, category });
+      const idx = state.data.templates.findIndex(t => t.id === id);
+      if (idx >= 0) {
+        state.data.templates[idx] = { ...state.data.templates[idx], name, content, category };
+      }
+    } catch (e) {
+      console.error('Failed to update template:', e);
+      throw e;
+    }
+  },
+
+  async deleteTemplate(id) {
+    try {
+      await invoke('delete_template', { id });
+      state.data.templates = state.data.templates.filter(t => t.id !== id);
+    } catch (e) {
+      console.error('Failed to delete template:', e);
       throw e;
     }
   },

@@ -41,6 +41,15 @@ struct NoteMetadata {
     sort_order: i32,
 }
 
+#[derive(Serialize, Deserialize, Clone)]
+struct Template {
+    id: String,
+    name: String,
+    content: String,
+    category: String,
+    created_at: i64,
+}
+
 fn init_db(conn: &Connection) {
     conn.execute_batch(
         "
@@ -146,7 +155,36 @@ fn init_db(conn: &Connection) {
         }
         conn.pragma_update(None, "user_version", 2).unwrap();
     }
-    // Future migrations: if version < 3 { ... conn.pragma_update(None, "user_version", 3).unwrap(); }
+
+    if version < 3 {
+        conn.execute(
+            "CREATE TABLE IF NOT EXISTS templates (
+                id TEXT PRIMARY KEY,
+                name TEXT NOT NULL,
+                content TEXT NOT NULL DEFAULT '',
+                category TEXT NOT NULL DEFAULT '',
+                created_at INTEGER NOT NULL
+            )",
+            [],
+        )
+        .unwrap();
+
+        // Insert default templates
+        let now = chrono::Utc::now().timestamp_millis();
+        let default_templates = vec![
+            ("meeting-" + &now.to_string(), "Meeting Notes", "# Meeting Notes\n\n## Attendees\n- \n\n## Agenda\n1. \n\n## Discussion Points\n- \n\n## Action Items\n- [ ] \n\n## Next Steps\n- ", "work", now),
+            ("dailylog-" + &now.to_string(), "Daily Log", "# Daily Log - {{date}}\n\n## Tasks\n- [ ] \n\n## Accomplishments\n- \n\n## Notes\n- \n\n## Tomorrow\n- ", "personal", now),
+            ("journal-" + &now.to_string(), "Journal Entry", "# Journal Entry - {{date}}\n\n## Mood\n\n## Highlights\n\n## Challenges\n\n## Gratitude\n\n## Thoughts\n\n## Goals for Tomorrow\n- ", "personal", now),
+        ];
+        for (id, name, content, category, created_at) in default_templates {
+            conn.execute(
+                "INSERT OR IGNORE INTO templates (id, name, content, category, created_at) VALUES (?1, ?2, ?3, ?4, ?5)",
+                rusqlite::params![id, name, content, category, created_at],
+            ).unwrap();
+        }
+        conn.pragma_update(None, "user_version", 3).unwrap();
+    }
+    // Future migrations: if version < 4 { ... conn.pragma_update(None, "user_version", 4).unwrap(); }
 }
 
 // ===== Folder commands =====
@@ -545,6 +583,73 @@ fn export_backup(db: State<Db>) -> Result<String, String> {
     Ok(file_path.to_string_lossy().to_string())
 }
 
+// ===== Template commands =====
+
+#[tauri::command]
+fn get_templates(db: State<Db>) -> Result<Vec<Template>, String> {
+    let conn = db.0.lock().map_err(|e| e.to_string())?;
+    let mut stmt = conn
+        .prepare("SELECT id, name, content, category, created_at FROM templates ORDER BY name")
+        .map_err(|e| e.to_string())?;
+    let templates = stmt
+        .query_map([], |row| {
+            Ok(Template {
+                id: row.get(0)?,
+                name: row.get(1)?,
+                content: row.get(2)?,
+                category: row.get(3)?,
+                created_at: row.get(4)?,
+            })
+        })
+        .map_err(|e| e.to_string())?
+        .collect::<Result<Vec<_>, _>>()
+        .map_err(|e| e.to_string())?;
+    Ok(templates)
+}
+
+#[tauri::command]
+fn create_template(
+    db: State<Db>,
+    id: String,
+    name: String,
+    content: String,
+    category: String,
+    created_at: i64,
+) -> Result<(), String> {
+    let conn = db.0.lock().map_err(|e| e.to_string())?;
+    conn.execute(
+        "INSERT INTO templates (id, name, content, category, created_at) VALUES (?1, ?2, ?3, ?4, ?5)",
+        rusqlite::params![id, name, content, category, created_at],
+    )
+    .map_err(|e| e.to_string())?;
+    Ok(())
+}
+
+#[tauri::command]
+fn update_template(
+    db: State<Db>,
+    id: String,
+    name: String,
+    content: String,
+    category: String,
+) -> Result<(), String> {
+    let conn = db.0.lock().map_err(|e| e.to_string())?;
+    conn.execute(
+        "UPDATE templates SET name = ?1, content = ?2, category = ?3 WHERE id = ?4",
+        rusqlite::params![name, content, category, id],
+    )
+    .map_err(|e| e.to_string())?;
+    Ok(())
+}
+
+#[tauri::command]
+fn delete_template(db: State<Db>, id: String) -> Result<(), String> {
+    let conn = db.0.lock().map_err(|e| e.to_string())?;
+    conn.execute("DELETE FROM templates WHERE id = ?1", rusqlite::params![id])
+        .map_err(|e| e.to_string())?;
+    Ok(())
+}
+
 // ===== Export commands =====
 
 #[tauri::command]
@@ -624,6 +729,10 @@ pub fn run() {
             reorder_notes,
             import_data,
             export_backup,
+            get_templates,
+            create_template,
+            update_template,
+            delete_template,
             export_note_markdown,
         ])
         .run(tauri::generate_context!())

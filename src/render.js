@@ -459,9 +459,14 @@ function renderSidebar() {
 
     <div class="sidebar-footer">
       <p>Write something worth keeping.</p>
-      <button class="settings-btn" onclick="openSettingsModal()" title="Settings">
-        ${icons.gear}
-      </button>
+      <div class="sidebar-footer-buttons">
+        <button class="settings-btn" onclick="openTemplatesModal()" title="Templates">
+          ${icons.file}
+        </button>
+        <button class="settings-btn" onclick="openSettingsModal()" title="Settings">
+          ${icons.gear}
+        </button>
+      </div>
     </div>
   `;
 
@@ -656,7 +661,7 @@ function handleFindBarKeydown(e) {
 function renderNotesHeader() {
   const root = document.getElementById('notes-header-root');
   if (!root) return;
-  const { activeFolderId } = state;
+  const { activeFolderId, data } = state;
   const activeFolder = state.foldersById.get(activeFolderId);
   const expandBtn = state.sidebarCollapsed ? `
     <button class="sidebar-expand-btn" onclick="toggleSidebar()" title="Show sidebar">
@@ -670,6 +675,8 @@ function renderNotesHeader() {
   const escapedSortTooltip = escapeHtml(sortTooltip);
   const shortcutLabel = escapeHtml(getShortcutLabel());
   const shortcutHint = escapeHtml(getShortcutHint());
+  const hasTemplates = data.templates && data.templates.length > 0;
+  
   root.innerHTML = `
     ${expandBtn}
     <h2 class="notes-header-title">${activeFolder ? escapeHtml(activeFolder.name) : ''}</h2>
@@ -689,10 +696,17 @@ function renderNotesHeader() {
       </button>
       <div class="sort-tooltip" id="sort-tooltip" role="tooltip">${escapedSortTooltip}</div>
     </div>
-    <button class="add-note-btn" onclick="addNote()">
-      ${icons.plus}
-      <span>New note</span>
-    </button>
+    <div class="new-note-dropdown">
+      <button class="add-note-btn" onclick="addNote()">
+        ${icons.plus}
+        <span>New note</span>
+      </button>
+      ${hasTemplates ? `
+        <button class="template-picker-btn" onclick="showTemplatePicker()" title="Create from template">
+          ${icons.file}
+        </button>
+      ` : ''}
+    </div>
   `;
 }
 
@@ -1608,6 +1622,261 @@ async function importBackup(event) {
   event.target.value = '';
 }
 
+// ===== TEMPLATES MODAL =====
+
+function renderTemplatesModal() {
+  const existing = document.getElementById('templates-modal-overlay');
+  if (existing) existing.remove();
+
+  if (!state.templatesModalOpen) return;
+
+  const { templates } = state.data;
+  const isEditing = state.editingTemplateId !== null;
+  const editingTemplate = isEditing ? templates.find(t => t.id === state.editingTemplateId) : null;
+
+  const overlay = document.createElement('div');
+  overlay.id = 'templates-modal-overlay';
+  overlay.className = 'modal-overlay';
+  overlay.onclick = () => closeTemplatesModal();
+  
+  const templatesList = templates.map(t => `
+    <div class="template-card">
+      <div class="template-card-header">
+        <span class="template-name">${escapeHtml(t.name)}</span>
+        <span class="template-category">${escapeHtml(t.category || 'Uncategorized')}</span>
+      </div>
+      <div class="template-preview">${escapeHtml(t.content.slice(0, 100))}${t.content.length > 100 ? '...' : ''}</div>
+      <div class="template-actions">
+        <button class="template-use-btn" onclick="useTemplate('${t.id}')" title="Create note from template">
+          ${icons.plus}
+          <span>Use</span>
+        </button>
+        <button class="template-edit-btn" onclick="editTemplate('${t.id}')" title="Edit template">
+          ${icons.edit}
+        </button>
+        <button class="template-delete-btn" onclick="deleteTemplate('${t.id}')" title="Delete template">
+          ${icons.trash}
+        </button>
+      </div>
+    </div>
+  `).join('');
+
+  const formContent = isEditing ? `
+    <div class="template-form">
+      <div class="form-group">
+        <label>Name</label>
+        <input type="text" id="template-name-input" value="${escapeHtml(editingTemplate.name)}" placeholder="Template name">
+      </div>
+      <div class="form-group">
+        <label>Category</label>
+        <input type="text" id="template-category-input" value="${escapeHtml(editingTemplate.category)}" placeholder="e.g., work, personal">
+      </div>
+      <div class="form-group">
+        <label>Content</label>
+        <textarea id="template-content-input" placeholder="Template content">${escapeHtml(editingTemplate.content)}</textarea>
+      </div>
+      <div class="form-actions">
+        <button class="settings-action-btn" onclick="saveTemplate()">Save Template</button>
+        <button class="settings-action-btn" onclick="cancelTemplateEdit()">Cancel</button>
+      </div>
+    </div>
+  ` : `
+    <div class="templates-list">
+      ${templates.length === 0 ? '<p class="empty-templates">No templates yet. Create one to get started.</p>' : templatesList}
+    </div>
+    <div class="template-form">
+      <h3>${isEditing ? 'Edit Template' : 'Create New Template'}</h3>
+      <div class="form-group">
+        <label>Name</label>
+        <input type="text" id="template-name-input" placeholder="Template name">
+      </div>
+      <div class="form-group">
+        <label>Category</label>
+        <input type="text" id="template-category-input" placeholder="e.g., work, personal">
+      </div>
+      <div class="form-group">
+        <label>Content</label>
+        <textarea id="template-content-input" placeholder="Template content"></textarea>
+      </div>
+      <div class="form-actions">
+        <button class="settings-action-btn" onclick="saveTemplate()">Create Template</button>
+      </div>
+    </div>
+  `;
+
+  overlay.innerHTML = `
+    <div class="modal-content templates-modal" onclick="event.stopPropagation()">
+      <div class="modal-header">
+        <h2>Note Templates</h2>
+        <button class="modal-close-btn" onclick="closeTemplatesModal()">${icons.x}</button>
+      </div>
+      <div class="modal-body templates-body">
+        ${!isEditing ? `
+          <div class="templates-sidebar">
+            <h3>Templates</h3>
+            ${templatesList}
+          </div>
+        ` : ''}
+        <div class="templates-main">
+          ${isEditing ? `
+            <h3>Edit Template</h3>
+            <div class="form-group">
+              <label>Name</label>
+              <input type="text" id="template-name-input" value="${escapeHtml(editingTemplate.name)}">
+            </div>
+            <div class="form-group">
+              <label>Category</label>
+              <input type="text" id="template-category-input" value="${escapeHtml(editingTemplate.category)}">
+            </div>
+            <div class="form-group">
+              <label>Content</label>
+              <textarea id="template-content-input">${escapeHtml(editingTemplate.content)}</textarea>
+            </div>
+            <div class="form-actions">
+              <button class="settings-action-btn" onclick="saveTemplate()">Save</button>
+              <button class="settings-action-btn" onclick="cancelTemplateEdit()">Cancel</button>
+            </div>
+          ` : `
+            <h3>Create New Template</h3>
+            <div class="form-group">
+              <label>Name</label>
+              <input type="text" id="template-name-input" placeholder="Template name">
+            </div>
+            <div class="form-group">
+              <label>Category</label>
+              <input type="text" id="template-category-input" placeholder="e.g., work, personal">
+            </div>
+            <div class="form-group">
+              <label>Content</label>
+              <textarea id="template-content-input" placeholder="Template content"></textarea>
+            </div>
+            <div class="form-actions">
+              <button class="settings-action-btn" onclick="saveTemplate()">Create Template</button>
+            </div>
+          `}
+        </div>
+      </div>
+    </div>
+  `;
+  document.body.appendChild(overlay);
+}
+
+function openTemplatesModal() {
+  state.templatesModalOpen = true;
+  state.editingTemplateId = null;
+  renderTemplatesModal();
+}
+
+function closeTemplatesModal() {
+  state.templatesModalOpen = false;
+  state.editingTemplateId = null;
+  renderTemplatesModal();
+}
+
+async function saveTemplate() {
+  const nameInput = document.getElementById('template-name-input');
+  const categoryInput = document.getElementById('template-category-input');
+  const contentInput = document.getElementById('template-content-input');
+  
+  if (!nameInput || !contentInput) return;
+  
+  const name = nameInput.value.trim();
+  const category = categoryInput?.value.trim() || '';
+  const content = contentInput.value;
+  
+  if (!name) {
+    alert('Please enter a template name');
+    return;
+  }
+
+  if (state.editingTemplateId) {
+    await DataLayer.updateTemplate(state.editingTemplateId, name, content, category);
+  } else {
+    const id = 'template-' + generateId();
+    const createdAt = Date.now();
+    await DataLayer.createTemplate(id, name, content, category, createdAt);
+  }
+  
+  state.editingTemplateId = null;
+  renderTemplatesModal();
+}
+
+function editTemplate(id) {
+  state.editingTemplateId = id;
+  renderTemplatesModal();
+}
+
+function cancelTemplateEdit() {
+  state.editingTemplateId = null;
+  renderTemplatesModal();
+}
+
+async function deleteTemplate(id) {
+  if (!confirm('Are you sure you want to delete this template?')) return;
+  await DataLayer.deleteTemplate(id);
+  renderTemplatesModal();
+}
+
+async function useTemplate(id) {
+  const template = state.data.templates.find(t => t.id === id);
+  if (!template) return;
+  
+  // Close templates modal
+  closeTemplatesModal();
+  
+  // Now create a new note with template content
+  if (!state.activeFolderId) {
+    alert('Please select a folder first');
+    return;
+  }
+  
+  // Replace {{date}} with current date
+  const now = new Date();
+  const dateStr = now.toLocaleDateString('en-US', { weekday: 'long', year: 'numeric', month: 'long', day: 'numeric' });
+  const content = template.content.replace(/\{\{date\}\}/g, dateStr);
+  
+  // Shift existing unpinned notes' sortOrder by +1
+  const unpinnedNotes = state.data.notes.filter(n => n.folderId === state.activeFolderId && !n.pinned);
+  unpinnedNotes.forEach(n => { n.sortOrder += 1; });
+  
+  const note = {
+    id: generateId(),
+    folderId: state.activeFolderId,
+    title: template.name,
+    preview: content,
+    body: content,
+    createdAt: Date.now(),
+    updatedAt: Date.now(),
+    pinned: 0,
+    sortOrder: 0,
+  };
+  
+  state.data.notes.push(note);
+  state.notesById.set(note.id, note);
+  const folderList = state.notesByFolderId.get(note.folderId);
+  if (folderList) folderList.push(note);
+  state.notesCountByFolder.set(note.folderId, (state.notesCountByFolder.get(note.folderId) || 0) + 1);
+  state.activeNoteId = note.id;
+  dirty.sidebar = true;
+  dirty.notesList = true;
+  await render({ focusTitle: true });
+  
+  await invoke('create_note', {
+    id: note.id, folderId: note.folderId, title: note.title,
+    body: note.body, createdAt: note.createdAt, updatedAt: note.updatedAt,
+    pinned: note.pinned, sortOrder: note.sortOrder
+  });
+  await invoke('reorder_notes', { updates: unpinnedNotes.map(n => [n.id, n.sortOrder]) });
+}
+
+function showTemplatePicker() {
+  if (!state.activeFolderId) {
+    alert('Please select a folder first');
+    return;
+  }
+  openTemplatesModal();
+}
+
 // ===== GLOBAL EVENT LISTENERS =====
 window.addEventListener('beforeunload', flushPendingSaves);
 document.addEventListener('click', closeContextMenu);
@@ -1726,3 +1995,11 @@ window.onNoteDrop = onNoteDrop;
 window.onNoteDragEnd = onNoteDragEnd;
 window.onNotesListDragOver = onNotesListDragOver;
 window.onNotesListDrop = onNotesListDrop;
+window.openTemplatesModal = openTemplatesModal;
+window.closeTemplatesModal = closeTemplatesModal;
+window.saveTemplate = saveTemplate;
+window.editTemplate = editTemplate;
+window.cancelTemplateEdit = cancelTemplateEdit;
+window.deleteTemplate = deleteTemplate;
+window.useTemplate = useTemplate;
+window.showTemplatePicker = showTemplatePicker;

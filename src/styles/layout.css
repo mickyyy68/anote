@@ -619,3 +619,212 @@
     padding-right: 10px;
   }
 }
+
+/* ===== TEMPLATES MODAL ===== */
+.templates-modal {
+  width: 800px;
+  max-width: 90vw;
+  max-height: 80vh;
+}
+
+.templates-body {
+  display: flex;
+  gap: 20px;
+  min-height: 400px;
+}
+
+.templates-sidebar {
+  flex: 1;
+  min-width: 250px;
+  border-right: 1px solid var(--border-color);
+  padding-right: 20px;
+  overflow-y: auto;
+}
+
+.templates-sidebar h3 {
+  margin: 0 0 16px 0;
+  font-size: 14px;
+  color: var(--text-secondary);
+  text-transform: uppercase;
+  letter-spacing: 0.5px;
+}
+
+.templates-main {
+  flex: 1;
+  padding-left: 0;
+}
+
+.templates-main h3 {
+  margin: 0 0 16px 0;
+}
+
+.template-card {
+  background: var(--bg-secondary);
+  border-radius: 8px;
+  padding: 12px;
+  margin-bottom: 10px;
+  cursor: pointer;
+  transition: background 0.15s;
+}
+
+.template-card:hover {
+  background: var(--bg-hover);
+}
+
+.template-card-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  margin-bottom: 8px;
+}
+
+.template-name {
+  font-weight: 600;
+  color: var(--text-primary);
+}
+
+.template-category {
+  font-size: 11px;
+  color: var(--text-secondary);
+  background: var(--bg-tertiary);
+  padding: 2px 8px;
+  border-radius: 10px;
+}
+
+.template-preview {
+  font-size: 12px;
+  color: var(--text-secondary);
+  margin-bottom: 10px;
+  line-height: 1.4;
+}
+
+.template-actions {
+  display: flex;
+  gap: 8px;
+}
+
+.template-use-btn,
+.template-edit-btn,
+.template-delete-btn {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  padding: 4px 10px;
+  border: none;
+  border-radius: 4px;
+  cursor: pointer;
+  font-size: 12px;
+  transition: background 0.15s;
+}
+
+.template-use-btn {
+  background: var(--accent-color);
+  color: white;
+}
+
+.template-use-btn:hover {
+  background: var(--accent-hover);
+}
+
+.template-edit-btn,
+.template-delete-btn {
+  background: var(--bg-tertiary);
+  color: var(--text-secondary);
+}
+
+.template-edit-btn:hover,
+.template-delete-btn:hover {
+  background: var(--bg-hover);
+}
+
+.template-edit-btn svg,
+.template-delete-btn svg {
+  width: 14px;
+  height: 14px;
+}
+
+.template-form {
+  margin-top: 20px;
+}
+
+.form-group {
+  margin-bottom: 16px;
+}
+
+.form-group label {
+  display: block;
+  font-size: 13px;
+  font-weight: 500;
+  color: var(--text-secondary);
+  margin-bottom: 6px;
+}
+
+.form-group input,
+.form-group textarea {
+  width: 100%;
+  padding: 10px 12px;
+  border: 1px solid var(--border-color);
+  border-radius: 6px;
+  background: var(--bg-primary);
+  color: var(--text-primary);
+  font-size: 14px;
+  font-family: inherit;
+}
+
+.form-group input:focus,
+.form-group textarea:focus {
+  outline: none;
+  border-color: var(--accent-color);
+}
+
+.form-group textarea {
+  min-height: 150px;
+  resize: vertical;
+}
+
+.form-actions {
+  display: flex;
+  gap: 10px;
+  margin-top: 20px;
+}
+
+.empty-templates {
+  color: var(--text-secondary);
+  text-align: center;
+  padding: 20px;
+}
+
+.template-picker-btn {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: 6px 12px;
+  margin-left: 8px;
+  background: var(--bg-tertiary);
+  border: none;
+  border-radius: 6px;
+  cursor: pointer;
+  font-size: 13px;
+  color: var(--text-secondary);
+  transition: background 0.15s;
+}
+
+.template-picker-btn:hover {
+  background: var(--bg-hover);
+  color: var(--text-primary);
+}
+
+.template-picker-btn svg {
+  width: 16px;
+  height: 16px;
+}
+
+.new-note-dropdown {
+  display: flex;
+  gap: 4px;
+}
+
+.sidebar-footer-buttons {
+  display: flex;
+  gap: 8px;
+}
