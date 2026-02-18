@@ -128,7 +128,7 @@ ALTER TABLE notes ADD COLUMN starred INTEGER NOT NULL DEFAULT 0;
 - [x] Export HTML (completed 2026-02-18)
 - [x] Export Markdown (completed 2026-02-18)
 - [x] Nested folders UI (completed 2026-02-18)
-- [ ] Note templates (not started)
+- [x] Note templates (completed 2026-02-18)
 - [ ] Favorites (not started)
 - [ ] Keyboard shortcuts (not started)
 
