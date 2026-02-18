@@ -1,6 +1,7 @@
 import { invoke } from '@tauri-apps/api/core';
+import { save } from '@tauri-apps/plugin-dialog';
 import { icons } from './icons.js';
-import { state, loadTheme, saveTheme, generateId, formatDate, escapeHtml, rebuildIndexes } from './state.js';
+import { state, DataLayer, loadTheme, saveTheme, generateId, formatDate, escapeHtml, rebuildIndexes } from './state.js';
 import { createEditor, destroyEditor, focusEditor, getEditorView, updateFindHighlights } from './editor.js';
 import { TextSelection } from '@milkdown/prose/state';
 
@@ -1341,6 +1342,23 @@ async function togglePinNote(id) {
   invoke('reorder_notes', { updates: allFolderNotes.map(n => [n.id, n.sortOrder]) });
 }
 
+async function exportMarkdownNote(id) {
+  const note = state.notesById.get(id);
+  if (!note) return;
+
+  try {
+    const filePath = await save({
+      defaultPath: `${note.title || 'note'}.md`,
+      filters: [{ name: 'Markdown', extensions: ['md'] }]
+    });
+    if (filePath) {
+      await DataLayer.exportNoteMarkdown(id, filePath);
+    }
+  } catch (e) {
+    console.error('Failed to export note:', e);
+  }
+}
+
 function showNoteContextMenu(e, noteId) {
   e.preventDefault();
   e.stopPropagation();
@@ -1357,6 +1375,9 @@ function showNoteContextMenu(e, noteId) {
   menu.innerHTML = `
     <button class="context-menu-item" onclick="closeContextMenu(); togglePinNote('${noteId}')">
       ${icons.pin} ${pinLabel}
+    </button>
+    <button class="context-menu-item" onclick="closeContextMenu(); exportMarkdownNote('${noteId}')">
+      ${icons.download} Export as Markdown
     </button>
     <div class="context-menu-separator"></div>
     <button class="context-menu-item danger" onclick="closeContextMenu(); deleteNote('${noteId}')">
@@ -1634,6 +1655,7 @@ window.exportBackup = exportBackup;
 window.importBackup = importBackup;
 window.toggleSortMode = toggleSortMode;
 window.togglePinNote = togglePinNote;
+window.exportMarkdownNote = exportMarkdownNote;
 window.showNoteContextMenu = showNoteContextMenu;
 window.onNoteDragStart = onNoteDragStart;
 window.onNoteDragOver = onNoteDragOver;

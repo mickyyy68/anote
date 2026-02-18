@@ -505,6 +505,31 @@ fn export_backup(db: State<Db>) -> Result<String, String> {
     Ok(file_path.to_string_lossy().to_string())
 }
 
+// ===== Export commands =====
+
+#[tauri::command]
+fn export_note_markdown(db: State<Db>, id: String, path: String) -> Result<(), String> {
+    // Get note from database
+    let conn = db.0.lock().map_err(|e| e.to_string())?;
+    let note: (String, String) = conn
+        .query_row(
+            "SELECT title, body FROM notes WHERE id = ?1",
+            rusqlite::params![id],
+            |row| Ok((row.get(0)?, row.get(1)?)),
+        )
+        .map_err(|e| e.to_string())?;
+    
+    let (title, body) = note;
+
+    // Format the markdown file with title as header
+    let markdown = format!("# {}\n\n{}", title, body);
+
+    // Write to file
+    std::fs::write(&path, markdown).map_err(|e| e.to_string())?;
+
+    Ok(())
+}
+
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
     tauri::Builder::default()
@@ -529,6 +554,9 @@ pub fn run() {
             init_db(&conn);
 
             app.manage(Db(Mutex::new(conn)));
+
+            // Add dialog plugin for file save dialogs
+            app.handle().plugin(tauri_plugin_dialog::init());
 
             if cfg!(debug_assertions) {
                 app.handle().plugin(
@@ -555,6 +583,7 @@ pub fn run() {
             reorder_notes,
             import_data,
             export_backup,
+            export_note_markdown,
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");

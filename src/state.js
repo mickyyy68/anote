@@ -69,6 +69,15 @@ export const DataLayer = {
       state.notesCountByFolder.clear();
     }
   },
+
+  async exportNoteMarkdown(noteId, path) {
+    try {
+      await invoke('export_note_markdown', { id: noteId, path });
+    } catch (e) {
+      console.error('Failed to export note as Markdown:', e);
+      throw e;
+    }
+  },
 };
 
 export async function migrateLocalStorage() {
