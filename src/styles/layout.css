@@ -411,6 +411,42 @@
   margin: 3px 6px;
 }
 
+.context-menu-submenu {
+  position: relative;
+}
+
+.context-submenu {
+  display: none;
+  position: absolute;
+  left: 100%;
+  top: 0;
+  min-width: 150px;
+  background: var(--bg-secondary);
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  box-shadow: var(--shadow-md);
+  padding: 3px 0;
+  z-index: 1000;
+}
+
+.context-menu-submenu:hover .context-submenu {
+  display: block;
+}
+
+.context-submenu .context-menu-item {
+  padding: 6px 12px;
+}
+
+.context-submenu .context-menu-item.disabled {
+  color: var(--text-tertiary);
+  cursor: default;
+}
+
+.context-submenu .context-menu-item .tag-color {
+  display: inline-block;
+  margin-right: 6px;
+}
+
 /* Settings modal */
 .modal-overlay {
   position: fixed;

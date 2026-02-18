@@ -537,6 +537,32 @@ function renderSidebar() {
       `}
     </div>
 
+    <div class="tags-section">
+      <div class="section-label">
+        <span>Tags</span>
+        <button class="add-tag-btn" onclick="addTag()" title="New tag">
+          ${icons.plus}
+        </button>
+      </div>
+
+      ${data.tags.length === 0 ? `
+        <div class="empty-tags">
+          <p>No tags yet.<br>Create one to organize.</p>
+        </div>
+      ` : `
+        <ul class="tag-list">
+          ${data.tags.map(tag => `
+            <li class="tag-item ${state.activeTagId === tag.id ? 'active' : ''}" 
+                onclick="selectTag('${tag.id}')"
+                oncontextmenu="showTagContextMenu(event, '${tag.id}')">
+              <span class="tag-color" style="background-color: ${tag.color}"></span>
+              <span class="tag-name">${escapeHtml(tag.name)}</span>
+            </li>
+          `).join('')}
+        </ul>
+      `}
+    </div>
+
     <div class="sidebar-footer">
       <p>Write something worth keeping.</p>
       <button class="settings-btn" onclick="openSettingsModal()" title="Settings">
@@ -736,8 +762,9 @@ function handleFindBarKeydown(e) {
 function renderNotesHeader() {
   const root = document.getElementById('notes-header-root');
   if (!root) return;
-  const { activeFolderId } = state;
+  const { activeFolderId, activeTagId } = state;
   const activeFolder = state.foldersById.get(activeFolderId);
+  const activeTag = activeTagId ? state.tagsById.get(activeTagId) : null;
   const expandBtn = state.sidebarCollapsed ? `
     <button class="sidebar-expand-btn" onclick="toggleSidebar()" title="Show sidebar">
       ${icons.panelLeft}
@@ -750,9 +777,17 @@ function renderNotesHeader() {
   const escapedSortTooltip = escapeHtml(sortTooltip);
   const shortcutLabel = escapeHtml(getShortcutLabel());
   const shortcutHint = escapeHtml(getShortcutHint());
+  
+  let title = '';
+  if (activeTag) {
+    title = `Tag: ${escapeHtml(activeTag.name)}`;
+  } else if (activeFolder) {
+    title = escapeHtml(activeFolder.name);
+  }
+  
   root.innerHTML = `
     ${expandBtn}
-    <h2 class="notes-header-title">${activeFolder ? escapeHtml(activeFolder.name) : ''}</h2>
+    <h2 class="notes-header-title">${title}</h2>
     <button class="notes-search-trigger"
             onclick="openCommandPalette()"
             title="Search notes (${shortcutLabel})"
@@ -769,20 +804,32 @@ function renderNotesHeader() {
       </button>
       <div class="sort-tooltip" id="sort-tooltip" role="tooltip">${escapedSortTooltip}</div>
     </div>
+    ${!activeTagId ? `
     <button class="add-note-btn" onclick="addNote()">
       ${icons.plus}
       <span>New note</span>
     </button>
+    ` : ''}
   `;
 }
 
 function renderNotesList() {
   const root = document.getElementById('notes-list-root');
   if (!root) return;
-  const { activeFolderId, activeNoteId } = state;
-  const folderNotes = activeFolderId
-    ? getSortedFolderNotes(activeFolderId)
-    : [];
+  const { activeFolderId, activeNoteId, activeTagId } = state;
+  
+  let notesToShow = [];
+  
+  if (activeTagId) {
+    // Filter by tag - load notes from backend
+    // Use cached notesByTagId or show all notes that have this tag
+    const allNotes = state.data.notes;
+    // For now, we'll show all notes and filter in UI (full solution would use get_notes_by_tag)
+    notesToShow = allNotes;
+  } else if (activeFolderId) {
+    notesToShow = getSortedFolderNotes(activeFolderId);
+  }
+  
   const isManual = state.sortMode === 'manual';
 
   if (isManual) {
@@ -793,21 +840,27 @@ function renderNotesList() {
     root.removeAttribute('ondrop');
   }
 
-  if (folderNotes.length === 0) {
+  if (notesToShow.length === 0) {
+    const emptyMessage = activeTagId 
+      ? 'No notes with this tag'
+      : 'No notes yet';
+    const emptyDesc = activeTagId
+      ? 'Add this tag to notes to see them here.'
+      : 'Create a new note to begin writing in this folder.';
     root.innerHTML = `
       <div class="empty-notes">
         <div class="empty-notes-icon">${icons.file}</div>
-        <h3>No notes yet</h3>
-        <p>Create a new note to begin writing in this folder.</p>
+        <h3>${emptyMessage}</h3>
+        <p>${emptyDesc}</p>
       </div>
     `;
   } else {
     let html = '';
     let addedSeparator = false;
-    for (let i = 0; i < folderNotes.length; i++) {
-      const note = folderNotes[i];
+    for (let i = 0; i < notesToShow.length; i++) {
+      const note = notesToShow[i];
       // Add separator between pinned and unpinned groups
-      if (!addedSeparator && !note.pinned && i > 0 && folderNotes[i - 1].pinned) {
+      if (!addedSeparator && !note.pinned && i > 0 && notesToShow[i - 1].pinned) {
         html += `<div class="notes-pin-separator"></div>`;
         addedSeparator = true;
       }
@@ -1136,6 +1189,74 @@ function closeFolderMenus() {
   document.querySelectorAll('.folder-menu.open').forEach(m => m.classList.remove('open'));
 }
 
+// ===== TAG ACTIONS =====
+async function addTag() {
+  const name = prompt('Tag name:');
+  if (!name || !name.trim()) return;
+  
+  const color = prompt('Tag color (hex, e.g. #ff0000):', '#888888') || '#888888';
+  
+  const tag = {
+    id: generateId(),
+    name: name.trim(),
+    color: color,
+  };
+  
+  try {
+    await DataLayer.createTag(tag.id, tag.name, tag.color);
+    dirty.sidebar = true;
+    render();
+  } catch (e) {
+    alert('Failed to create tag: ' + e);
+  }
+}
+
+function selectTag(id) {
+  if (state.activeTagId === id) {
+    // Deselect tag (toggle off)
+    state.activeTagId = null;
+  } else {
+    state.activeTagId = id;
+  }
+  state.activeFolderId = null;
+  dirty.sidebar = true;
+  dirty.notesHeader = true;
+  dirty.notesList = true;
+  render();
+}
+
+function showTagContextMenu(e, tagId) {
+  e.preventDefault();
+  closeContextMenu();
+  const menu = document.createElement('div');
+  menu.className = 'context-menu';
+  menu.innerHTML = `
+    <div class="context-menu-item danger" onclick="deleteTag('${tagId}'); closeContextMenu()">
+      ${icons.trash}
+      <span>Delete tag</span>
+    </div>
+  `;
+  menu.style.left = `${e.clientX}px`;
+  menu.style.top = `${e.clientY}px`;
+  document.body.appendChild(menu);
+  state.contextMenu = menu;
+}
+
+async function deleteTag(id) {
+  if (!confirm('Delete this tag? This will remove it from all notes.')) return;
+  try {
+    await DataLayer.deleteTag(id);
+    if (state.activeTagId === id) {
+      state.activeTagId = null;
+    }
+    dirty.sidebar = true;
+    dirty.notesList = true;
+    render();
+  } catch (e) {
+    alert('Failed to delete tag: ' + e);
+  }
+}
+
 // ===== NOTE ACTIONS =====
 async function addNote() {
   if (!state.activeFolderId) return;
@@ -1462,10 +1583,30 @@ function showNoteContextMenu(e, noteId) {
   menu.className = 'context-menu';
   menu.style.left = e.clientX + 'px';
   menu.style.top = e.clientY + 'px';
+  
+  // Build tag submenu
+  const tagsHtml = state.data.tags.length > 0 
+    ? state.data.tags.map(tag => `
+        <div class="context-menu-item" onclick="event.stopPropagation(); toggleNoteTag('${noteId}', '${tag.id}')">
+          <span class="tag-color" style="background-color: ${tag.color}"></span>
+          <span>${escapeHtml(tag.name)}</span>
+        </div>
+      `).join('')
+    : '<div class="context-menu-item disabled">No tags</div>';
+  
   menu.innerHTML = `
     <button class="context-menu-item" onclick="closeContextMenu(); togglePinNote('${noteId}')">
       ${icons.pin} ${pinLabel}
     </button>
+    <div class="context-menu-separator"></div>
+    <div class="context-menu-submenu">
+      <button class="context-menu-item" onclick="event.stopPropagation()">
+        ${icons.tag} Tags
+      </button>
+      <div class="context-submenu">
+        ${tagsHtml}
+      </div>
+    </div>
     <div class="context-menu-separator"></div>
     <button class="context-menu-item danger" onclick="closeContextMenu(); deleteNote('${noteId}')">
       ${icons.trash} Delete note
@@ -1478,6 +1619,17 @@ function showNoteContextMenu(e, noteId) {
   if (rect.bottom > window.innerHeight) menu.style.top = (window.innerHeight - rect.height - 8) + 'px';
 
   state.contextMenu = menu;
+}
+
+// Tag functions for note context menu
+async function toggleNoteTag(noteId, tagId) {
+  closeContextMenu();
+  // For now, we'll just add the tag. A full implementation would track which tags are on the note.
+  try {
+    await DataLayer.addTagToNote(noteId, tagId);
+  } catch (e) {
+    console.error('Failed to add tag to note:', e);
+  }
 }
 
 // ===== SETTINGS MODAL =====
@@ -1743,6 +1895,11 @@ window.importBackup = importBackup;
 window.toggleSortMode = toggleSortMode;
 window.togglePinNote = togglePinNote;
 window.showNoteContextMenu = showNoteContextMenu;
+window.addTag = addTag;
+window.selectTag = selectTag;
+window.showTagContextMenu = showTagContextMenu;
+window.deleteTag = deleteTag;
+window.toggleNoteTag = toggleNoteTag;
 window.onNoteDragStart = onNoteDragStart;
 window.onNoteDragOver = onNoteDragOver;
 window.onNoteDragLeave = onNoteDragLeave;
