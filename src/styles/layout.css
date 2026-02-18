@@ -447,6 +447,16 @@
   margin-right: 6px;
 }
 
+.context-submenu .context-menu-item .check-mark {
+  margin-left: auto;
+  color: var(--accent);
+}
+
+.context-submenu .context-menu-item .check-mark svg {
+  width: 12px;
+  height: 12px;
+}
+
 /* Settings modal */
 .modal-overlay {
   position: fixed;

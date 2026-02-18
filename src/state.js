@@ -28,6 +28,7 @@ export const state = {
   notesCountByFolder: new Map(),
   tagsById: new Map(),
   notesByTagId: new Map(),
+  noteTags: new Map(),  // noteId -> Set of tagIds
 };
 
 export function rebuildIndexes() {
@@ -37,6 +38,7 @@ export function rebuildIndexes() {
   state.notesCountByFolder.clear();
   state.tagsById.clear();
   state.notesByTagId.clear();
+  state.noteTags.clear();
   
   for (const f of state.data.folders) {
     state.foldersById.set(f.id, f);
@@ -54,6 +56,8 @@ export function rebuildIndexes() {
     const list = state.notesByFolderId.get(n.folderId);
     if (list) list.push(n);
     state.notesCountByFolder.set(n.folderId, (state.notesCountByFolder.get(n.folderId) || 0) + 1);
+    // Initialize empty tag set for each note
+    state.noteTags.set(n.id, new Set());
   }
 }
 

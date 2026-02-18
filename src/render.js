@@ -821,11 +821,18 @@ function renderNotesList() {
   let notesToShow = [];
   
   if (activeTagId) {
-    // Filter by tag - load notes from backend
-    // Use cached notesByTagId or show all notes that have this tag
-    const allNotes = state.data.notes;
-    // For now, we'll show all notes and filter in UI (full solution would use get_notes_by_tag)
-    notesToShow = allNotes;
+    // Filter by tag - use cached notesByTagId if available, otherwise show all
+    // The notesByTagId is populated when we load tags for a note
+    const tagNotes = state.notesByTagId.get(activeTagId);
+    if (tagNotes && tagNotes.length > 0) {
+      notesToShow = tagNotes;
+    } else {
+      // Fallback: filter from all notes (less efficient but works)
+      notesToShow = state.data.notes.filter(n => {
+        const noteTags = state.noteTags.get(n.id);
+        return noteTags && noteTags.has(activeTagId);
+      });
+    }
   } else if (activeFolderId) {
     notesToShow = getSortedFolderNotes(activeFolderId);
   }
@@ -1305,8 +1312,35 @@ function selectNote(id) {
   const newCard = document.querySelector(`.note-card[data-note-id="${id}"]`);
   if (newCard) newCard.classList.add('active');
 
+  // Load tags for this note and update noteTags index
+  loadNoteTags(id);
+
   // Only rebuild the editor
   renderEditorPanel();
+}
+
+async function loadNoteTags(noteId) {
+  try {
+    const tags = await invoke('get_tags_for_note', { noteId });
+    const tagSet = new Set(tags.map(t => t.id));
+    state.noteTags.set(noteId, tagSet);
+    
+    // Also update notesByTagId index
+    state.notesByTagId.clear();
+    for (const [nid, tids] of state.noteTags) {
+      for (const tid of tids) {
+        if (!state.notesByTagId.has(tid)) {
+          state.notesByTagId.set(tid, []);
+        }
+        const note = state.notesById.get(nid);
+        if (note) {
+          state.notesByTagId.get(tid).push(note);
+        }
+      }
+    }
+  } catch (e) {
+    console.error('Failed to load note tags:', e);
+  }
 }
 
 const saveTimeouts = new Map();
@@ -1584,14 +1618,20 @@ function showNoteContextMenu(e, noteId) {
   menu.style.left = e.clientX + 'px';
   menu.style.top = e.clientY + 'px';
   
-  // Build tag submenu
+  // Get tags for this note to show checkmarks
+  const noteTagSet = state.noteTags.get(noteId) || new Set();
+  
+  // Build tag submenu with checkmarks
   const tagsHtml = state.data.tags.length > 0 
-    ? state.data.tags.map(tag => `
-        <div class="context-menu-item" onclick="event.stopPropagation(); toggleNoteTag('${noteId}', '${tag.id}')">
+    ? state.data.tags.map(tag => {
+        const isActive = noteTagSet.has(tag.id);
+        return `
+        <div class="context-menu-item ${isActive ? 'checked' : ''}" onclick="event.stopPropagation(); toggleNoteTag('${noteId}', '${tag.id}')">
           <span class="tag-color" style="background-color: ${tag.color}"></span>
           <span>${escapeHtml(tag.name)}</span>
+          ${isActive ? '<span class="check-mark">' + icons.check + '</span>' : ''}
         </div>
-      `).join('')
+      `}).join('')
     : '<div class="context-menu-item disabled">No tags</div>';
   
   menu.innerHTML = `
@@ -1624,11 +1664,41 @@ function showNoteContextMenu(e, noteId) {
 // Tag functions for note context menu
 async function toggleNoteTag(noteId, tagId) {
   closeContextMenu();
-  // For now, we'll just add the tag. A full implementation would track which tags are on the note.
+  const noteTagSet = state.noteTags.get(noteId) || new Set();
+  const hasTag = noteTagSet.has(tagId);
+  
   try {
-    await DataLayer.addTagToNote(noteId, tagId);
+    if (hasTag) {
+      // Remove tag
+      await DataLayer.removeTagFromNote(noteId, tagId);
+      noteTagSet.delete(tagId);
+    } else {
+      // Add tag
+      await DataLayer.addTagToNote(noteId, tagId);
+      noteTagSet.add(tagId);
+    }
+    state.noteTags.set(noteId, noteTagSet);
+    
+    // Rebuild notesByTagId index
+    state.notesByTagId.clear();
+    for (const [nid, tids] of state.noteTags) {
+      for (const tid of tids) {
+        if (!state.notesByTagId.has(tid)) {
+          state.notesByTagId.set(tid, []);
+        }
+        const note = state.notesById.get(nid);
+        if (note) {
+          state.notesByTagId.get(tid).push(note);
+        }
+      }
+    }
+    
+    // If we're currently filtering by this tag, refresh the list
+    if (state.activeTagId === tagId) {
+      renderNotesList();
+    }
   } catch (e) {
-    console.error('Failed to add tag to note:', e);
+    console.error('Failed to toggle tag on note:', e);
   }
 }
 
