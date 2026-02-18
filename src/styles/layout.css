@@ -429,7 +429,8 @@
   z-index: 1000;
 }
 
-.context-menu-submenu:hover .context-submenu {
+.context-menu-submenu:hover .context-submenu,
+.context-menu-submenu:focus-within .context-submenu {
   display: block;
 }
 
