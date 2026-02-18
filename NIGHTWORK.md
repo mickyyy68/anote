@@ -131,7 +131,7 @@ ALTER TABLE notes ADD COLUMN starred INTEGER NOT NULL DEFAULT 0;
 - [x] Nested folders UI (completed 2026-02-18)
 - [x] Note templates (completed 2026-02-18)
 - [x] Favorites (completed 2026-02-18)
-- [ ] Keyboard shortcuts (not started)
+- [x] Keyboard shortcuts (completed 2026-02-18)
 
 ## Notes
 - The database schema already has `pinned` and `sort_order` columns
