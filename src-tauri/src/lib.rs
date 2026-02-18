@@ -172,9 +172,9 @@ fn init_db(conn: &Connection) {
         // Insert default templates
         let now = chrono::Utc::now().timestamp_millis();
         let default_templates = vec![
-            ("meeting-" + &now.to_string(), "Meeting Notes", "# Meeting Notes\n\n## Attendees\n- \n\n## Agenda\n1. \n\n## Discussion Points\n- \n\n## Action Items\n- [ ] \n\n## Next Steps\n- ", "work", now),
-            ("dailylog-" + &now.to_string(), "Daily Log", "# Daily Log - {{date}}\n\n## Tasks\n- [ ] \n\n## Accomplishments\n- \n\n## Notes\n- \n\n## Tomorrow\n- ", "personal", now),
-            ("journal-" + &now.to_string(), "Journal Entry", "# Journal Entry - {{date}}\n\n## Mood\n\n## Highlights\n\n## Challenges\n\n## Gratitude\n\n## Thoughts\n\n## Goals for Tomorrow\n- ", "personal", now),
+            ("meeting-".to_string() + &now.to_string(), "Meeting Notes", "# Meeting Notes\n\n## Attendees\n- \n\n## Agenda\n1. \n\n## Discussion Points\n- \n\n## Action Items\n- [ ] \n\n## Next Steps\n- ", "work", now),
+            ("dailylog-".to_string() + &now.to_string(), "Daily Log", "# Daily Log - {{date}}\n\n## Tasks\n- [ ] \n\n## Accomplishments\n- \n\n## Notes\n- \n\n## Tomorrow\n- ", "personal", now),
+            ("journal-".to_string() + &now.to_string(), "Journal Entry", "# Journal Entry - {{date}}\n\n## Mood\n\n## Highlights\n\n## Challenges\n\n## Gratitude\n\n## Thoughts\n\n## Goals for Tomorrow\n- ", "personal", now),
         ];
         for (id, name, content, category, created_at) in default_templates {
             conn.execute(
@@ -701,7 +701,7 @@ pub fn run() {
             app.manage(Db(Mutex::new(conn)));
 
             // Add dialog plugin for file save dialogs
-            app.handle().plugin(tauri_plugin_dialog::init());
+            app.handle().plugin(tauri_plugin_dialog::init()).expect("failed to initialize dialog plugin");
 
             if cfg!(debug_assertions) {
                 app.handle().plugin(
