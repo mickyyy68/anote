@@ -1018,6 +1018,9 @@ async function moveFolderTo(folderId, newParentId) {
   const oldParentId = folder.parentId;
   if (oldParentId === newParentId) return;
   
+  // Track whether new parent was already expanded before we expand it
+  const wasExpanded = newParentId ? state.expandedFolders.has(newParentId) : false;
+  
   folder.parentId = newParentId;
   
   // Expand the new parent so the folder is visible
@@ -1038,6 +1041,10 @@ async function moveFolderTo(folderId, newParentId) {
     console.error('Failed to move folder:', e);
     // Revert on error
     folder.parentId = oldParentId;
+    // Only remove expansion if it wasn't previously expanded
+    if (newParentId && !wasExpanded) {
+      state.expandedFolders.delete(newParentId);
+    }
     dirty.sidebar = true;
     render();
   }
@@ -1094,7 +1101,7 @@ function showFolderContextMenu(e, folderId) {
         </button>
         ${availableFolders}
       </div>
-    </button>
+    </div>
     <div class="context-menu-separator"></div>
     <button class="context-menu-item danger" onclick="closeContextMenu(); deleteFolder('${folderId}')">
       ${icons.trash} Delete folder
@@ -1422,8 +1429,12 @@ async function exportMarkdownNote(id) {
   if (!note) return;
 
   try {
+    // Sanitize filename for filesystem safety
+    const rawTitle = (note.title || 'note').trim();
+    const safeTitle = rawTitle.replace(/[\\/:*?"<>|]+/g, '_') || 'note';
+    
     const filePath = await save({
-      defaultPath: `${note.title || 'note'}.md`,
+      defaultPath: `${safeTitle}.md`,
       filters: [{ name: 'Markdown', extensions: ['md'] }]
     });
     if (filePath) {

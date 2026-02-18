@@ -668,7 +668,7 @@
 }
 
 .template-card:hover {
-  background: var(--bg-hover);
+  background: var(--bg-hover, var(--bg-secondary, var(--bg-tertiary)));
 }
 
 .template-card-header {
@@ -718,7 +718,7 @@
 }
 
 .template-use-btn {
-  background: var(--accent-color);
+  background: var(--accent-color, var(--accent, var(--accent-hover)));
   color: white;
 }
 
@@ -734,7 +734,7 @@
 
 .template-edit-btn:hover,
 .template-delete-btn:hover {
-  background: var(--bg-hover);
+  background: var(--bg-hover, var(--bg-secondary, var(--bg-tertiary)));
 }
 
 .template-edit-btn svg,
@@ -774,7 +774,7 @@
 .form-group input:focus,
 .form-group textarea:focus {
   outline: none;
-  border-color: var(--accent-color);
+  border-color: var(--accent-color, var(--accent, var(--accent-hover)));
 }
 
 .form-group textarea {
@@ -810,7 +810,7 @@
 }
 
 .template-picker-btn:hover {
-  background: var(--bg-hover);
+  background: var(--bg-hover, var(--bg-secondary, var(--bg-tertiary)));
   color: var(--text-primary);
 }
 
