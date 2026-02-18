@@ -2,7 +2,7 @@ import { invoke } from '@tauri-apps/api/core';
 import { save } from '@tauri-apps/plugin-dialog';
 import { icons } from './icons.js';
 import { state, DataLayer, loadTheme, saveTheme, generateId, formatDate, escapeHtml, rebuildIndexes } from './state.js';
-import { createEditor, destroyEditor, focusEditor, getEditorView, updateFindHighlights } from './editor.js';
+import { createEditor, destroyEditor, focusEditor, getEditorView, updateFindHighlights, showLinkPicker, updateLinkPicker, closeLinkPicker, isLinkPickerOpen, setLinkPickerCallback } from './editor.js';
 import { TextSelection } from '@milkdown/prose/state';
 
 // Track which note the editor is currently showing
@@ -399,6 +399,172 @@ function selectCommandResult(index) {
   state.activeFolderId = selected.folderId;
   state.activeNoteId = selected.noteId;
   closeCommandPalette();
+  render();
+}
+
+// ===== WIKI LINK HANDLING =====
+
+// Find a note by title (case-insensitive)
+function findNoteByTitle(title) {
+  const normalizedTitle = title.toLowerCase().trim();
+  return state.data.notes.find(n => 
+    (n.title || '').toLowerCase().trim() === normalizedTitle
+  );
+}
+
+// Get notes for autocomplete (excluding current note)
+function getNotesForAutocomplete(excludeNoteId) {
+  return state.data.notes
+    .filter(n => n.id !== excludeNoteId)
+    .map(note => {
+      const folder = state.foldersById.get(note.folderId);
+      return {
+        noteId: note.id,
+        folderId: note.folderId,
+        title: note.title || 'Untitled',
+        folderName: folder ? folder.name : 'Untitled folder',
+        updatedAt: note.updatedAt,
+      };
+    })
+    .sort((a, b) => b.updatedAt - a.updatedAt)
+    .slice(0, 10);
+}
+
+// Navigate to a wiki link - create note if it doesn't exist
+async function navigateToWikiLink(title) {
+  // Close any open pickers
+  closeLinkPicker();
+  
+  // Find existing note by title
+  let targetNote = findNoteByTitle(title);
+  
+  if (!targetNote) {
+    // Note doesn't exist - create it in the current folder
+    if (!state.activeFolderId) {
+      // No folder selected - can't create note
+      console.warn('Cannot create note: no folder selected');
+      return;
+    }
+    
+    // Create a new note with the wiki link title
+    const unpinnedNotes = state.data.notes.filter(n => n.folderId === state.activeFolderId && !n.pinned);
+    unpinnedNotes.forEach(n => { n.sortOrder += 1; });
+    
+    targetNote = {
+      id: generateId(),
+      folderId: state.activeFolderId,
+      title: title,
+      preview: '',
+      body: '',
+      createdAt: Date.now(),
+      updatedAt: Date.now(),
+      pinned: 0,
+      sortOrder: 0,
+    };
+    
+    state.data.notes.push(targetNote);
+    state.notesById.set(targetNote.id, targetNote);
+    const folderList = state.notesByFolderId.get(targetNote.folderId);
+    if (folderList) folderList.push(targetNote);
+    state.notesCountByFolder.set(targetNote.folderId, (state.notesCountByFolder.get(targetNote.folderId) || 0) + 1);
+    
+    // Create in backend
+    await invoke('create_note', {
+      id: targetNote.id,
+      folderId: targetNote.folderId,
+      title: targetNote.title,
+      body: targetNote.body,
+      createdAt: targetNote.createdAt,
+      updatedAt: targetNote.updatedAt,
+      pinned: targetNote.pinned,
+      sortOrder: targetNote.sortOrder,
+    });
+    await invoke('reorder_notes', { updates: unpinnedNotes.map(n => [n.id, n.sortOrder]) });
+  }
+  
+  // Navigate to the note
+  state.activeFolderId = targetNote.folderId;
+  state.activeNoteId = targetNote.id;
+  dirty.notesList = true;
+  render();
+}
+
+// Expose navigateToWikiLink to window for editor click handler
+window.navigateToWikiLink = navigateToWikiLink;
+
+// Set up link picker callback
+setLinkPickerCallback((query) => {
+  const results = getNotesForAutocomplete(state.activeNoteId)
+    .filter(n => !query || (n.title || '').toLowerCase().includes(query.toLowerCase()));
+  updateLinkPicker(results, query);
+});
+
+// Handle keyboard input in editor to trigger link picker
+function handleEditorKeydown(e) {
+  if (isLinkPickerOpen()) {
+    if (e.key === 'Escape') {
+      closeLinkPicker();
+      e.preventDefault();
+      return true;
+    }
+    if (e.key === 'Enter' || e.key === 'Tab') {
+      const picker = document.querySelector('.link-picker');
+      const firstItem = picker?.querySelector('.link-picker-item');
+      if (firstItem) {
+        firstItem.click();
+        e.preventDefault();
+        return true;
+      }
+    }
+  }
+  return false;
+}
+
+// ===== BACKLINKS =====
+
+// Extract wiki links from note body
+function extractWikiLinks(body) {
+  if (!body) return [];
+  const links = [];
+  const regex = /\[\[([^\]]+)\]\]/g;
+  let match;
+  while ((match = regex.exec(body)) !== null) {
+    links.push(match[1].trim());
+  }
+  return links;
+}
+
+// Get backlinks for a note (which notes link to this note)
+function getBacklinks(noteId) {
+  const targetNote = state.notesById.get(noteId);
+  if (!targetNote) return [];
+  
+  const targetTitle = (targetNote.title || '').toLowerCase().trim();
+  const backlinks = [];
+  
+  for (const note of state.data.notes) {
+    if (note.id === noteId) continue; // Skip self
+    
+    // Check if this note's body contains a link to the target note
+    // We need the full body to check this
+    const links = extractWikiLinks(note.body || '');
+    if (links.some(link => link.toLowerCase() === targetTitle)) {
+      const folder = state.foldersById.get(note.folderId);
+      backlinks.push({
+        noteId: note.id,
+        title: note.title || 'Untitled',
+        folderName: folder ? folder.name : 'Unknown folder',
+      });
+    }
+  }
+  
+  return backlinks;
+}
+
+// Navigate to a note from a backlink
+function selectNoteFromBacklink(noteId, targetFolderId) {
+  state.activeFolderId = targetFolderId;
+  state.activeNoteId = noteId;
   render();
 }
 
@@ -817,6 +983,22 @@ async function renderEditorPanel(focusTitle) {
     if (state.activeNoteId !== activeNote.id) return;
   }
 
+  // Get backlinks for this note
+  const backlinks = getBacklinks(activeNote.id);
+  const backlinksHtml = backlinks.length > 0 ? `
+    <div class="backlinks-section">
+      <div class="backlinks-header">Linked from</div>
+      <div class="backlinks-list">
+        ${backlinks.map(bl => `
+          <button class="backlink-item" onclick="selectNoteFromBacklink('${bl.noteId}', '${activeNote.folderId}')">
+            <span class="backlink-title">${escapeHtml(bl.title)}</span>
+            <span class="backlink-folder">${escapeHtml(bl.folderName)}</span>
+          </button>
+        `).join('')}
+      </div>
+    </div>
+  ` : '';
+
   root.innerHTML = `
     <input class="editor-title-input"
            type="text"
@@ -825,6 +1007,7 @@ async function renderEditorPanel(focusTitle) {
            id="editor-title" />
     <div class="editor-date">${formatDate(activeNote.updatedAt)}</div>
     <div class="editor-body" id="editor-milkdown"></div>
+    ${backlinksHtml}
   `;
 
   // Wire up title input with addEventListener
@@ -1974,6 +2157,13 @@ document.addEventListener('keydown', (e) => {
     return;
   }
 
+  // Handle wiki link picker (global escape to close)
+  if (isLinkPickerOpen() && e.key === 'Escape') {
+    e.preventDefault();
+    closeLinkPicker();
+    return;
+  }
+
   // Cmd/Ctrl+S: Save current note
   if ((e.metaKey || e.ctrlKey) && e.key.toLowerCase() === 's') {
     e.preventDefault();
@@ -2116,3 +2306,4 @@ window.cancelTemplateEdit = cancelTemplateEdit;
 window.deleteTemplate = deleteTemplate;
 window.useTemplate = useTemplate;
 window.showTemplatePicker = showTemplatePicker;
+window.selectNoteFromBacklink = selectNoteFromBacklink;
