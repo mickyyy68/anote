@@ -437,7 +437,14 @@ function renderSidebar() {
       </div>
     </div>
 
-    <div class="folders-section">
+    <div class="filters-section">
+      <button class="filter-item \${state.favoritesFilter ? 'active' : ''}" onclick="toggleFavoritesFilter()" title="Show favorites">
+        \${icons.star}
+        <span>Favorites</span>
+      </button>
+    </div>
+
+<div class="folders-section">
       <div class="section-label">
         <span>Folders</span>
         <button class="add-folder-btn" onclick="addFolder()" title="New folder">
@@ -713,11 +720,20 @@ function renderNotesHeader() {
 function renderNotesList() {
   const root = document.getElementById('notes-list-root');
   if (!root) return;
-  const { activeFolderId, activeNoteId } = state;
-  const folderNotes = activeFolderId
-    ? getSortedFolderNotes(activeFolderId)
-    : [];
-  const isManual = state.sortMode === 'manual';
+  const { activeFolderId, activeNoteId, favoritesFilter } = state;
+  
+  // When favorites filter is active, show all starred notes
+  let folderNotes;
+  if (favoritesFilter) {
+    folderNotes = state.data.notes
+      .filter(n => n.starred)
+      .sort((a, b) => (b.pinned - a.pinned) || (b.updatedAt - a.updatedAt));
+  } else {
+    folderNotes = activeFolderId
+      ? getSortedFolderNotes(activeFolderId)
+      : [];
+  }
+  const isManual = state.sortMode === 'manual' && !favoritesFilter;
 
   if (isManual) {
     root.setAttribute('ondragover', 'onNotesListDragOver(event)');
@@ -751,7 +767,7 @@ function renderNotesList() {
            onclick="selectNote('${note.id}')"
            oncontextmenu="showNoteContextMenu(event, '${note.id}')"
            data-note-id="${note.id}"
-           data-pinned="${note.pinned ? '1' : '0'}"
+           data-pinned="${note.pinned ? '1' : '0'}" data-starred="${note.starred ? '1' : '0'}"
            ${dragAttrs}>
         ${note.pinned ? `<div class="note-card-pin-indicator">${icons.pin}</div>` : ''}
         <div class="note-card-title">${escapeHtml(note.title || 'Untitled')}</div>
@@ -759,6 +775,9 @@ function renderNotesList() {
         <div class="note-card-date">${formatDate(note.updatedAt)}</div>
         <button class="note-card-pin" onclick="event.stopPropagation(); togglePinNote('${note.id}')" title="${note.pinned ? 'Unpin' : 'Pin to top'}">
           ${icons.pin}
+        </button>
+        <button class="note-card-star" onclick="event.stopPropagation(); toggleStarNote('${note.id}')" title="${note.starred ? 'Remove from favorites' : 'Add to favorites'}">
+          ${note.starred ? icons.starFilled : icons.star}
         </button>
         <button class="note-card-delete" onclick="event.stopPropagation(); deleteNote('${note.id}')" title="Delete note">
           ${icons.x}
@@ -1393,6 +1412,15 @@ function toggleSortMode() {
   renderNotesList();
 }
 
+function toggleFavoritesFilter() {
+  state.favoritesFilter = !state.favoritesFilter;
+  // Clear active folder when entering favorites view
+  if (state.favoritesFilter) {
+    state.activeFolderId = null;
+  }
+  render();
+}
+
 async function togglePinNote(id) {
   const note = state.notesById.get(id);
   if (!note) return;
@@ -1415,6 +1443,14 @@ async function togglePinNote(id) {
   // Persist reorder for all notes in the folder
   const allFolderNotes = state.data.notes.filter(n => n.folderId === note.folderId);
   invoke('reorder_notes', { updates: allFolderNotes.map(n => [n.id, n.sortOrder]) });
+}
+
+async function toggleStarNote(id) {
+  const note = state.notesById.get(id);
+  if (!note) return;
+  note.starred = note.starred ? 0 : 1;
+  renderNotesList();
+  invoke('toggle_note_starred', { id, starred: note.starred });
 }
 
 async function exportMarkdownNote(id) {
@@ -1986,6 +2022,7 @@ window.exportBackup = exportBackup;
 window.importBackup = importBackup;
 window.toggleSortMode = toggleSortMode;
 window.togglePinNote = togglePinNote;
+window.toggleStarNote = toggleStarNote;
 window.exportMarkdownNote = exportMarkdownNote;
 window.showNoteContextMenu = showNoteContextMenu;
 window.onNoteDragStart = onNoteDragStart;

@@ -12,6 +12,7 @@ export const state = {
   sidebarCollapsed: false,
   settingsModalOpen: false,
   sortMode: 'manual',
+  favoritesFilter: false,
   commandPaletteOpen: false,
   commandQuery: '',
   commandSelectedIndex: 0,
@@ -60,7 +61,7 @@ export const DataLayer = {
         id: n.id, folderId: n.folder_id, title: n.title,
         preview: n.preview, body: null,
         createdAt: n.created_at, updatedAt: n.updated_at,
-        pinned: n.pinned || 0, sortOrder: n.sort_order || 0
+        pinned: n.pinned || 0, starred: n.starred || 0, sortOrder: n.sort_order || 0
       }));
       state.data.templates = templates.map(t => ({
         id: t.id, name: t.name, content: t.content,

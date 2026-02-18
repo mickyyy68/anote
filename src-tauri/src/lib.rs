@@ -27,6 +27,8 @@ struct Note {
     pinned: i32,
     #[serde(default)]
     sort_order: i32,
+    #[serde(default)]
+    starred: i32,
 }
 
 #[derive(Serialize, Clone)]
@@ -39,6 +41,7 @@ struct NoteMetadata {
     updated_at: i64,
     pinned: i32,
     sort_order: i32,
+    starred: i32,
 }
 
 #[derive(Serialize, Deserialize, Clone)]
@@ -184,7 +187,21 @@ fn init_db(conn: &Connection) {
         }
         conn.pragma_update(None, "user_version", 3).unwrap();
     }
-    // Future migrations: if version < 4 { ... conn.pragma_update(None, "user_version", 4).unwrap(); }
+
+    if version < 4 {
+        let has_starred = conn
+            .prepare("SELECT starred FROM notes LIMIT 0")
+            .is_ok();
+        if !has_starred {
+            conn.execute(
+                "ALTER TABLE notes ADD COLUMN starred INTEGER NOT NULL DEFAULT 0",
+                [],
+            )
+            .unwrap();
+        }
+        conn.pragma_update(None, "user_version", 4).unwrap();
+    }
+    // Future migrations: if version < 5 { ... conn.pragma_update(None, "user_version", 5).unwrap(); }
 }
 
 // ===== Folder commands =====
@@ -315,7 +332,7 @@ fn delete_folder_recursive(conn: &Connection, id: &str) -> Result<(), String> {
 fn get_notes_metadata(db: State<Db>) -> Result<Vec<NoteMetadata>, String> {
     let conn = db.0.lock().map_err(|e| e.to_string())?;
     let mut stmt = conn
-        .prepare("SELECT id, folder_id, title, substr(body, 1, 200), created_at, updated_at, pinned, sort_order FROM notes")
+        .prepare("SELECT id, folder_id, title, substr(body, 1, 200), created_at, updated_at, pinned, sort_order, starred FROM notes")
         .map_err(|e| e.to_string())?;
     let notes = stmt
         .query_map([], |row| {
@@ -328,6 +345,7 @@ fn get_notes_metadata(db: State<Db>) -> Result<Vec<NoteMetadata>, String> {
                 updated_at: row.get(5)?,
                 pinned: row.get(6)?,
                 sort_order: row.get(7)?,
+                starred: row.get(8)?,
             })
         })
         .map_err(|e| e.to_string())?
@@ -353,7 +371,7 @@ fn get_note_body(db: State<Db>, id: String) -> Result<String, String> {
 fn get_notes_all(db: State<Db>) -> Result<Vec<Note>, String> {
     let conn = db.0.lock().map_err(|e| e.to_string())?;
     let mut stmt = conn
-        .prepare("SELECT id, folder_id, title, body, created_at, updated_at, pinned, sort_order FROM notes")
+        .prepare("SELECT id, folder_id, title, body, created_at, updated_at, pinned, sort_order, starred FROM notes")
         .map_err(|e| e.to_string())?;
     let notes = stmt
         .query_map([], |row| {
@@ -366,6 +384,7 @@ fn get_notes_all(db: State<Db>) -> Result<Vec<Note>, String> {
                 updated_at: row.get(5)?,
                 pinned: row.get(6)?,
                 sort_order: row.get(7)?,
+                starred: row.get(8)?,
             })
         })
         .map_err(|e| e.to_string())?
@@ -381,7 +400,7 @@ fn search_notes(db: State<Db>, query: String) -> Result<Vec<NoteMetadata>, Strin
     let mut stmt = conn
         .prepare(
             "SELECT n.id, n.folder_id, n.title, substr(n.body, 1, 200), \
-             n.created_at, n.updated_at, n.pinned, n.sort_order \
+             n.created_at, n.updated_at, n.pinned, n.sort_order, n.starred \
              FROM notes_fts f \
              JOIN notes n ON n.rowid = f.rowid \
              WHERE notes_fts MATCH ?1 \
@@ -400,6 +419,7 @@ fn search_notes(db: State<Db>, query: String) -> Result<Vec<NoteMetadata>, Strin
                 updated_at: row.get(5)?,
                 pinned: row.get(6)?,
                 sort_order: row.get(7)?,
+                starred: row.get(8)?,
             })
         })
         .map_err(|e| e.to_string())?
@@ -419,11 +439,12 @@ fn create_note(
     updated_at: i64,
     pinned: i32,
     sort_order: i32,
+    starred: i32,
 ) -> Result<(), String> {
     let conn = db.0.lock().map_err(|e| e.to_string())?;
     conn.execute(
-        "INSERT INTO notes (id, folder_id, title, body, created_at, updated_at, pinned, sort_order) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8)",
-        rusqlite::params![id, folder_id, title, body, created_at, updated_at, pinned, sort_order],
+        "INSERT INTO notes (id, folder_id, title, body, created_at, updated_at, pinned, sort_order, starred) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9)",
+        rusqlite::params![id, folder_id, title, body, created_at, updated_at, pinned, sort_order, starred],
     )
     .map_err(|e| e.to_string())?;
     Ok(())
@@ -468,6 +489,43 @@ fn toggle_note_pinned(db: State<Db>, id: String, pinned: i32) -> Result<(), Stri
 }
 
 #[tauri::command]
+fn toggle_note_starred(db: State<Db>, id: String, starred: i32) -> Result<(), String> {
+    let conn = db.0.lock().map_err(|e| e.to_string())?;
+    conn.execute(
+        "UPDATE notes SET starred = ?1 WHERE id = ?2",
+        rusqlite::params![starred, id],
+    )
+    .map_err(|e| e.to_string())?;
+    Ok(())
+}
+
+#[tauri::command]
+fn get_favorite_notes(db: State<Db>) -> Result<Vec<NoteMetadata>, String> {
+    let conn = db.0.lock().map_err(|e| e.to_string())?;
+    let mut stmt = conn
+        .prepare("SELECT id, folder_id, title, substr(body, 1, 200), created_at, updated_at, pinned, sort_order, starred FROM notes WHERE starred = 1 ORDER BY updated_at DESC")
+        .map_err(|e| e.to_string())?;
+    let notes = stmt
+        .query_map([], |row| {
+            Ok(NoteMetadata {
+                id: row.get(0)?,
+                folder_id: row.get(1)?,
+                title: row.get(2)?,
+                preview: row.get(3)?,
+                created_at: row.get(4)?,
+                updated_at: row.get(5)?,
+                pinned: row.get(6)?,
+                sort_order: row.get(7)?,
+                starred: row.get(8)?,
+            })
+        })
+        .map_err(|e| e.to_string())?
+        .collect::<Result<Vec<_>, _>>()
+        .map_err(|e| e.to_string())?;
+    Ok(notes)
+}
+
+#[tauri::command]
 fn reorder_notes(db: State<Db>, updates: Vec<(String, i32)>) -> Result<(), String> {
     if updates.is_empty() {
         return Ok(());
@@ -508,8 +566,8 @@ fn import_data(db: State<Db>, folders: Vec<Folder>, notes: Vec<Note>) -> Result<
     }
     for note in &notes {
         tx.execute(
-            "INSERT OR IGNORE INTO notes (id, folder_id, title, body, created_at, updated_at, pinned, sort_order) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8)",
-            rusqlite::params![note.id, note.folder_id, note.title, note.body, note.created_at, note.updated_at, note.pinned, note.sort_order],
+            "INSERT OR IGNORE INTO notes (id, folder_id, title, body, created_at, updated_at, pinned, sort_order, starred) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9)",
+            rusqlite::params![note.id, note.folder_id, note.title, note.body, note.created_at, note.updated_at, note.pinned, note.sort_order, note.starred],
         )
         .map_err(|e| e.to_string())?;
     }
@@ -542,7 +600,7 @@ fn export_backup(db: State<Db>) -> Result<String, String> {
 
     // Query all notes (full body)
     let mut note_stmt = conn
-        .prepare("SELECT id, folder_id, title, body, created_at, updated_at, pinned, sort_order FROM notes")
+        .prepare("SELECT id, folder_id, title, body, created_at, updated_at, pinned, sort_order, starred FROM notes")
         .map_err(|e| e.to_string())?;
     let notes: Vec<serde_json::Value> = note_stmt
         .query_map([], |row| {
@@ -554,7 +612,8 @@ fn export_backup(db: State<Db>) -> Result<String, String> {
                 "created_at": row.get::<_, i64>(4)?,
                 "updated_at": row.get::<_, i64>(5)?,
                 "pinned": row.get::<_, i32>(6)?,
-                "sort_order": row.get::<_, i32>(7)?
+                "sort_order": row.get::<_, i32>(7)?,
+                "starred": row.get::<_, i32>(8)?
             }))
         })
         .map_err(|e| e.to_string())?
@@ -726,6 +785,8 @@ pub fn run() {
             update_note,
             delete_note,
             toggle_note_pinned,
+            toggle_note_starred,
+            get_favorite_notes,
             reorder_notes,
             import_data,
             export_backup,
