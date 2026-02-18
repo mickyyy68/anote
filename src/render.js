@@ -1357,9 +1357,15 @@ function persistNote(note) {
   return invoke('update_note', {
     id: note.id, title: note.title, body: note.body, updatedAt: note.updatedAt
   }).catch((e) => {
+    // Check for CONFLICT error code from bridge instead of string matching
+    if (e && e.code === 'CONFLICT') {
+      // Another writer won; refresh from disk so UI converges to canonical state.
+      triggerExternalSync();
+      return;
+    }
     const message = String(e || '').toLowerCase();
     if (message.startsWith('conflict')) {
-      // Another writer won; refresh from disk so UI converges to canonical state.
+      // Fallback for non-structured errors
       triggerExternalSync();
       return;
     }
