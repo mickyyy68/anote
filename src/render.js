@@ -1930,7 +1930,12 @@ document.addEventListener('keydown', (e) => {
 
   if ((e.metaKey || e.ctrlKey) && e.key.toLowerCase() === 'f') {
     e.preventDefault();
-    if (state.activeNoteId) openFindBar();
+    // Cmd/Ctrl+F: Focus search (command palette) when no note active, find bar when note active
+    if (state.activeNoteId) {
+      openFindBar();
+    } else {
+      openCommandPalette();
+    }
     return;
   }
 
@@ -1969,6 +1974,75 @@ document.addEventListener('keydown', (e) => {
     return;
   }
 
+  // Cmd/Ctrl+S: Save current note
+  if ((e.metaKey || e.ctrlKey) && e.key.toLowerCase() === 's') {
+    e.preventDefault();
+    if (state.activeNoteId) {
+      flushPendingSaves();
+    }
+    return;
+  }
+
+  // Cmd/Ctrl+D: Delete current note
+  if ((e.metaKey || e.ctrlKey) && e.key.toLowerCase() === 'd') {
+    e.preventDefault();
+    if (state.activeNoteId) {
+      deleteNote(state.activeNoteId);
+    }
+    return;
+  }
+
+  // Cmd/Ctrl+P: Toggle pin on current note
+  if ((e.metaKey || e.ctrlKey) && e.key.toLowerCase() === 'p') {
+    e.preventDefault();
+    if (state.activeNoteId) {
+      togglePinNote(state.activeNoteId);
+    }
+    return;
+  }
+
+  // Cmd/Ctrl+Shift+F: Toggle favorite/star on current note
+  if ((e.metaKey || e.ctrlKey) && e.shiftKey && e.key.toLowerCase() === 'f') {
+    e.preventDefault();
+    if (state.activeNoteId) {
+      toggleStarNote(state.activeNoteId);
+    }
+    return;
+  }
+
+  // Arrow keys: Navigate between notes
+  if (e.key === 'ArrowDown' || e.key === 'ArrowUp') {
+    // Only navigate if not in an input/textarea
+    const tag = e.target.tagName;
+    if (tag === 'INPUT' || tag === 'TEXTAREA') return;
+    
+    e.preventDefault();
+    const folderNotes = state.activeFolderId 
+      ? getSortedFolderNotes(state.activeFolderId)
+      : state.data.notes.filter(n => n.starred).sort((a, b) => (b.pinned - a.pinned) || (b.updatedAt - a.updatedAt));
+    
+    if (folderNotes.length === 0) return;
+    
+    const currentIndex = state.activeNoteId 
+      ? folderNotes.findIndex(n => n.id === state.activeNoteId)
+      : -1;
+    
+    let newIndex;
+    if (e.key === 'ArrowDown') {
+      newIndex = currentIndex < folderNotes.length - 1 ? currentIndex + 1 : 0;
+    } else {
+      newIndex = currentIndex > 0 ? currentIndex - 1 : folderNotes.length - 1;
+    }
+    
+    const newNote = folderNotes[newIndex];
+    if (newNote) {
+      state.activeNoteId = newNote.id;
+      renderNotesList();
+      renderEditorPanel();
+    }
+    return;
+  }
+
   if ((e.metaKey || e.ctrlKey) && e.key === 'n') {
     e.preventDefault();
     if (state.activeFolderId) addNote();
@@ -1983,6 +2057,7 @@ document.addEventListener('keydown', (e) => {
   }
   if (e.key === 'Escape') {
     if (state.settingsModalOpen) { closeSettingsModal(); return; }
+    if (state.templatesModalOpen) { closeTemplatesModal(); return; }
     closeContextMenu();
   }
 });
