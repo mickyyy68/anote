@@ -133,6 +133,8 @@ ALTER TABLE notes ADD COLUMN starred INTEGER NOT NULL DEFAULT 0;
 - [x] Favorites (completed 2026-02-18)
 - [x] Keyboard shortcuts (completed 2026-02-18)
 - [x] Install cargo + fix Rust compilation (completed 2026-02-18)
+- [ ] Note Linking - wiki-style [[note-title]] links (IN PROGRESS)
+- [ ] Sort Options - By date created, date modified, title, manual
 
 ## Notes
 - The database schema already has `pinned` and `sort_order` columns
