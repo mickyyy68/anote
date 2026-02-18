@@ -1,3 +1,7 @@
+mod bridge_cli;
+mod db;
+pub use bridge_cli::maybe_run_from_args as maybe_run_bridge_cli;
+
 use rusqlite::Connection;
 use serde::{Deserialize, Serialize};
 use std::sync::Mutex;
@@ -554,6 +558,17 @@ fn export_backup(db: State<Db>) -> Result<String, String> {
 
 #[tauri::command]
 fn export_note_markdown(db: State<Db>, id: String, path: String) -> Result<(), String> {
+    // Basic validation: ensure path is absolute and doesn't contain traversal sequences
+    let path_obj = std::path::Path::new(&path);
+    if !path_obj.is_absolute() {
+        return Err("export path must be absolute".to_string());
+    }
+    for component in path_obj.components() {
+        if let std::path::Component::ParentDir = component {
+            return Err("export path must not contain '..'".to_string());
+        }
+    }
+
     // Get note from database
     let mut conn = db.0.lock().map_err(|e| e.to_string())?;
     let note: (String, String) = conn

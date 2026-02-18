@@ -1263,7 +1263,11 @@ async function addTag() {
   const name = prompt('Tag name:');
   if (!name || !name.trim()) return;
   
-  const color = prompt('Tag color (hex, e.g. #ff0000):', '#888888') || '#888888';
+  let color = prompt('Tag color (hex, e.g. #ff0000):', '#888888') || '#888888';
+  // Validate hex color format
+  if (!/^#[0-9A-Fa-f]{6}$/.test(color)) {
+    color = '#888888';
+  }
   
   const tag = {
     id: generateId(),
@@ -1385,18 +1389,29 @@ async function loadNoteTags(noteId) {
   try {
     const tags = await invoke('get_tags_for_note', { noteId });
     const tagSet = new Set(tags.map(t => t.id));
+    const oldTagSet = state.noteTags.get(noteId) || new Set();
     state.noteTags.set(noteId, tagSet);
     
-    // Also update notesByTagId index
-    state.notesByTagId.clear();
-    for (const [nid, tids] of state.noteTags) {
-      for (const tid of tids) {
-        if (!state.notesByTagId.has(tid)) {
-          state.notesByTagId.set(tid, []);
+    // Incrementally update notesByTagId
+    const note = state.notesById.get(noteId);
+    if (note) {
+      // Remove from old tags
+      for (const oldTagId of oldTagSet) {
+        if (!tagSet.has(oldTagId)) {
+          const list = state.notesByTagId.get(oldTagId);
+          if (list) {
+            const idx = list.findIndex(n => n.id === noteId);
+            if (idx !== -1) list.splice(idx, 1);
+          }
         }
-        const note = state.notesById.get(nid);
-        if (note) {
-          state.notesByTagId.get(tid).push(note);
+      }
+      // Add to new tags
+      for (const newTagId of tagSet) {
+        if (!oldTagSet.has(newTagId)) {
+          if (!state.notesByTagId.has(newTagId)) {
+            state.notesByTagId.set(newTagId, []);
+          }
+          state.notesByTagId.get(newTagId).push(note);
         }
       }
     }

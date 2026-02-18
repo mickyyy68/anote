@@ -18,8 +18,8 @@ export default function CreateNoteCommand() {
     setIsSubmitting(true);
     try {
       const result = await createNoteViaBridge({
-        title: values.title || "",
-        body: values.body || "",
+        title: values.title?.trim() || "",
+        body: values.body?.trim() || "",
         // Omitted folder ID instructs bridge to ensure/use the dedicated Inbox folder.
         folderId: values.folderId?.trim() ? values.folderId.trim() : undefined,
       });

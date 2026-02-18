@@ -61,7 +61,7 @@
     "test": "bun test"
   },
   "dependencies": {
-    "@raycast/api": "^1.94.0",
+    "@raycast/api": "1.94.0",
     "react": "19.0.0"
   },
   "devDependencies": {
