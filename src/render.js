@@ -1408,8 +1408,15 @@ async function exportMarkdownNote(id) {
   if (!note) return;
 
   try {
+    // Flush any pending edits before exporting
+    flushPendingSaves();
+    
+    // Sanitize filename for filesystem safety
+    const rawTitle = (note.title || 'note').trim();
+    const safeTitle = rawTitle.replace(/[\\/:*?"<>|]+/g, '_') || 'note';
+    
     const filePath = await save({
-      defaultPath: `${note.title || 'note'}.md`,
+      defaultPath: `${safeTitle}.md`,
       filters: [{ name: 'Markdown', extensions: ['md'] }]
     });
     if (filePath) {

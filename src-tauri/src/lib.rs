@@ -203,6 +203,10 @@ fn rename_folder(db: State<Db>, id: String, name: String) -> Result<(), String> 
 #[tauri::command]
 fn update_folder(db: State<Db>, id: String, name: Option<String>, parent_id: Option<Option<String>>) -> Result<(), String> {
     let conn = db.0.lock().map_err(|e| e.to_string())?;
+    
+    // Use transaction for atomicity
+    let tx = conn.transaction().map_err(|e| e.to_string())?;
+    
     // Validate that parent_id is not the folder's own id (prevent self-reference)
     if let Some(Some(ref pid)) = parent_id {
         if pid == &id {
@@ -214,7 +218,7 @@ fn update_folder(db: State<Db>, id: String, name: Option<String>, parent_id: Opt
             if curr == id {
                 return Err("cannot create circular folder reference".to_string());
             }
-            let mut stmt = conn
+            let mut stmt = tx
                 .prepare("SELECT parent_id FROM folders WHERE id = ?1")
                 .map_err(|e| e.to_string())?;
             current = stmt
@@ -224,19 +228,20 @@ fn update_folder(db: State<Db>, id: String, name: Option<String>, parent_id: Opt
         }
     }
     if let Some(n) = name {
-        conn.execute(
+        tx.execute(
             "UPDATE folders SET name = ?1 WHERE id = ?2",
             rusqlite::params![n, id],
         )
         .map_err(|e| e.to_string())?;
     }
     if let Some(pid) = parent_id {
-        conn.execute(
+        tx.execute(
             "UPDATE folders SET parent_id = ?1 WHERE id = ?2",
             rusqlite::params![pid, id],
         )
         .map_err(|e| e.to_string())?;
     }
+    tx.commit().map_err(|e| e.to_string())?;
     Ok(())
 }
 
@@ -596,7 +601,7 @@ pub fn run() {
             app.manage(Db(Mutex::new(conn)));
 
             // Add dialog plugin for file save dialogs
-            app.handle().plugin(tauri_plugin_dialog::init());
+            app.handle().plugin(tauri_plugin_dialog::init()).expect("failed to initialize dialog plugin");
 
             if cfg!(debug_assertions) {
                 app.handle().plugin(
