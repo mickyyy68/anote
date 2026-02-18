@@ -2,6 +2,21 @@ import { invoke } from '@tauri-apps/api/core';
 
 const STORAGE_KEY = 'anote_data';
 const THEME_KEY = 'anote_theme';
+const SORT_MODE_KEY = 'anote_sort_mode';
+
+// Valid sort modes
+export const SORT_MODES = ['manual', 'modified', 'created', 'title'];
+
+export function loadSortMode() {
+  const stored = localStorage.getItem(SORT_MODE_KEY);
+  return SORT_MODES.includes(stored) ? stored : 'manual';
+}
+
+export function saveSortMode(mode) {
+  if (SORT_MODES.includes(mode)) {
+    localStorage.setItem(SORT_MODE_KEY, mode);
+  }
+}
 
 export const state = {
   data: { folders: [], notes: [], templates: [] },
@@ -11,7 +26,7 @@ export const state = {
   contextMenu: null,
   sidebarCollapsed: false,
   settingsModalOpen: false,
-  sortMode: 'manual',
+  sortMode: loadSortMode(),
   favoritesFilter: false,
   commandPaletteOpen: false,
   commandQuery: '',

@@ -329,11 +329,23 @@ fn delete_folder_recursive(conn: &Connection, id: &str) -> Result<(), String> {
 // ===== Note commands =====
 
 #[tauri::command]
-fn get_notes_metadata(db: State<Db>) -> Result<Vec<NoteMetadata>, String> {
+fn get_notes_metadata(db: State<Db>, sort_by: Option<String>) -> Result<Vec<NoteMetadata>, String> {
     let conn = db.0.lock().map_err(|e| e.to_string())?;
-    let mut stmt = conn
-        .prepare("SELECT id, folder_id, title, substr(body, 1, 200), created_at, updated_at, pinned, sort_order, starred FROM notes")
-        .map_err(|e| e.to_string())?;
+    
+    let order_clause = match sort_by.as_deref() {
+        Some("created") => "ORDER BY created_at DESC",
+        Some("modified") => "ORDER BY updated_at DESC",
+        Some("title") => "ORDER BY title ASC, updated_at DESC",
+        Some("manual") | None => "ORDER BY pinned DESC, sort_order ASC, updated_at DESC",
+        _ => "ORDER BY pinned DESC, sort_order ASC, updated_at DESC",
+    };
+    
+    let sql = format!(
+        "SELECT id, folder_id, title, substr(body, 1, 200), created_at, updated_at, pinned, sort_order, starred FROM notes {}",
+        order_clause
+    );
+    
+    let mut stmt = conn.prepare(&sql).map_err(|e| e.to_string())?;
     let notes = stmt
         .query_map([], |row| {
             Ok(NoteMetadata {

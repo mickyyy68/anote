@@ -1,7 +1,7 @@
 import { invoke } from '@tauri-apps/api/core';
 import { save } from '@tauri-apps/plugin-dialog';
 import { icons } from './icons.js';
-import { state, DataLayer, loadTheme, saveTheme, generateId, formatDate, escapeHtml, rebuildIndexes } from './state.js';
+import { state, DataLayer, loadTheme, saveTheme, generateId, formatDate, escapeHtml, rebuildIndexes, saveSortMode, SORT_MODES } from './state.js';
 import { createEditor, destroyEditor, focusEditor, getEditorView, updateFindHighlights, showLinkPicker, updateLinkPicker, closeLinkPicker, isLinkPickerOpen, setLinkPickerCallback } from './editor.js';
 import { TextSelection } from '@milkdown/prose/state';
 
@@ -571,10 +571,24 @@ function selectNoteFromBacklink(noteId, targetFolderId) {
 // ===== SORT HELPER =====
 function getSortedFolderNotes(folderId) {
   const notes = (state.notesByFolderId.get(folderId) || []).slice();
-  if (state.sortMode === 'recent') {
-    return notes.sort((a, b) => (b.pinned - a.pinned) || (b.updatedAt - a.updatedAt));
+  
+  // Sort by pinned first, then by sort mode
+  const sortBy = state.sortMode;
+  
+  // Helper to sort pinned notes to top
+  const pinnedSort = (a, b) => (b.pinned - a.pinned);
+  
+  if (sortBy === 'modified') {
+    return notes.sort((a, b) => pinnedSort(a, b) || (b.updatedAt - a.updatedAt));
   }
-  return notes.sort((a, b) => (b.pinned - a.pinned) || (a.sortOrder - b.sortOrder));
+  if (sortBy === 'created') {
+    return notes.sort((a, b) => pinnedSort(a, b) || (b.createdAt - a.createdAt));
+  }
+  if (sortBy === 'title') {
+    return notes.sort((a, b) => pinnedSort(a, b) || ((a.title || '').localeCompare(b.title || '')));
+  }
+  // 'manual' or default
+  return notes.sort((a, b) => pinnedSort(a, b) || (a.sortOrder - b.sortOrder));
 }
 
 // ===== DRAG STATE =====
@@ -834,21 +848,30 @@ function handleFindBarKeydown(e) {
 function renderNotesHeader() {
   const root = document.getElementById('notes-header-root');
   if (!root) return;
-  const { activeFolderId, data } = state;
+  const { activeFolderId, data, sortMode } = state;
   const activeFolder = state.foldersById.get(activeFolderId);
   const expandBtn = state.sidebarCollapsed ? `
     <button class="sidebar-expand-btn" onclick="toggleSidebar()" title="Show sidebar">
       ${icons.panelLeft}
     </button>
   ` : '';
-  const sortIcon = state.sortMode === 'manual' ? icons.gripLines : icons.clock;
-  const sortTooltip = state.sortMode === 'manual'
-    ? 'Manual order - click to sort by date'
-    : 'Date order - click to sort manually';
-  const escapedSortTooltip = escapeHtml(sortTooltip);
   const shortcutLabel = escapeHtml(getShortcutLabel());
   const shortcutHint = escapeHtml(getShortcutHint());
   const hasTemplates = data.templates && data.templates.length > 0;
+  
+  // Sort options
+  const sortOptions = [
+    { value: 'manual', label: 'Manual' },
+    { value: 'modified', label: 'Modified' },
+    { value: 'created', label: 'Created' },
+    { value: 'title', label: 'Title' },
+  ];
+  
+  const sortOptionsHtml = sortOptions.map(opt => 
+    `<option value="${opt.value}" ${sortMode === opt.value ? 'selected' : ''}>${opt.label}</option>`
+  ).join('');
+  
+  const sortLabel = sortOptions.find(o => o.value === sortMode)?.label || 'Manual';
   
   root.innerHTML = `
     ${expandBtn}
@@ -860,14 +883,10 @@ function renderNotesHeader() {
       <span class="notes-search-placeholder">Search notes...</span>
       <span class="notes-search-shortcut">${shortcutHint}</span>
     </button>
-    <div class="sort-tooltip-wrap">
-      <button class="sort-toggle-btn"
-              onclick="toggleSortMode()"
-              aria-label="${escapedSortTooltip}"
-              aria-describedby="sort-tooltip">
-        ${sortIcon}
-      </button>
-      <div class="sort-tooltip" id="sort-tooltip" role="tooltip">${escapedSortTooltip}</div>
+    <div class="sort-dropdown-wrap">
+      <select class="sort-select" onchange="changeSortMode(this.value)" aria-label="Sort notes">
+        ${sortOptionsHtml}
+      </select>
     </div>
     <div class="new-note-dropdown">
       <button class="add-note-btn" onclick="addNote()">
@@ -1589,10 +1608,12 @@ function onNoteDragEnd() {
 }
 
 // ===== SORT & PIN =====
-function toggleSortMode() {
-  state.sortMode = state.sortMode === 'manual' ? 'recent' : 'manual';
-  renderNotesHeader();
-  renderNotesList();
+function changeSortMode(mode) {
+  if (SORT_MODES.includes(mode)) {
+    state.sortMode = mode;
+    saveSortMode(mode);
+    renderNotesList();
+  }
 }
 
 function toggleFavoritesFilter() {
@@ -2285,7 +2306,7 @@ window.handleFindBarKeydown = handleFindBarKeydown;
 window.navigateFindMatch = navigateFindMatch;
 window.exportBackup = exportBackup;
 window.importBackup = importBackup;
-window.toggleSortMode = toggleSortMode;
+window.changeSortMode = changeSortMode;
 window.togglePinNote = togglePinNote;
 window.flushPendingSaves = flushPendingSaves;
 window.toggleStarNote = toggleStarNote;
