@@ -430,7 +430,8 @@
 }
 
 .context-menu-submenu:hover .context-submenu,
-.context-menu-submenu:focus-within .context-submenu {
+.context-menu-submenu:focus-within .context-submenu,
+.context-menu-item.has-submenu:focus-within .context-submenu {
   display: block;
 }
 
