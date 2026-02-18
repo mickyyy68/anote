@@ -2097,6 +2097,7 @@ window.exportBackup = exportBackup;
 window.importBackup = importBackup;
 window.toggleSortMode = toggleSortMode;
 window.togglePinNote = togglePinNote;
+window.flushPendingSaves = flushPendingSaves;
 window.toggleStarNote = toggleStarNote;
 window.exportMarkdownNote = exportMarkdownNote;
 window.showNoteContextMenu = showNoteContextMenu;
