@@ -50,19 +50,21 @@ export function insertWikiLink(title) {
   const { state, dispatch } = view;
   let { from, to } = state.selection;
   
-  // Get the text before the cursor to check for partial [[
+  // Get the text before the cursor to check for partial [[ or [
   const textBefore = state.doc.textBetween(Math.max(0, from - 2), from);
   
-  // If there's a partial [[, adjust to include it for deletion
+  // If there's a partial [[ or single [, adjust to include it for deletion
   let deleteFrom = from;
   if (textBefore === '[[') {
     deleteFrom = from - 2;
+  } else if (textBefore === '[') {
+    deleteFrom = from - 1;
   }
   
   const linkText = `[[${title}]]`;
   
   // Delete any partial text and insert the complete link
-  dispatch(state.tr.insertText(linkText, deleteFrom, to));
+  dispatch(state.tr.insertText(linkText, Math.max(0, deleteFrom), to));
   
   // Close picker
   closeLinkPicker();
@@ -73,29 +75,48 @@ export function updateLinkPicker(results, query) {
   if (!linkPicker) return;
   linkPicker._query = query;
   
+  // Clear existing content
+  linkPicker.innerHTML = '';
+  
   if (results.length === 0) {
-    linkPicker.innerHTML = '<div class="link-picker-empty">No matching notes</div>';
+    const emptyDiv = document.createElement('div');
+    emptyDiv.className = 'link-picker-empty';
+    emptyDiv.textContent = 'No matching notes';
+    linkPicker.appendChild(emptyDiv);
     return;
   }
   
-  linkPicker.innerHTML = results.map((note, i) => `
-    <button class="link-picker-item" data-index="${i}" data-note-id="${note.noteId}">
-      <span class="link-picker-title">${note.title || 'Untitled'}</span>
-      <span class="link-picker-folder">${note.folderName}</span>
-    </button>
-  `).join('');
-  
-  // Add click handlers
-  linkPicker.querySelectorAll('.link-picker-item').forEach(btn => {
+  // Use createElement to avoid XSS
+  results.forEach((note, i) => {
+    const btn = document.createElement('button');
+    btn.className = 'link-picker-item';
+    btn.dataset.index = i;
+    btn.dataset.noteId = note.noteId;
+    
+    const titleSpan = document.createElement('span');
+    titleSpan.className = 'link-picker-title';
+    titleSpan.textContent = note.title || 'Untitled';
+    
+    const folderSpan = document.createElement('span');
+    folderSpan.className = 'link-picker-folder';
+    folderSpan.textContent = note.folderName || '';
+    
+    btn.appendChild(titleSpan);
+    btn.appendChild(folderSpan);
+    
     btn.addEventListener('click', (e) => {
       e.stopPropagation();
       const noteId = btn.dataset.noteId;
       const title = btn.querySelector('.link-picker-title').textContent;
+      // Only call insertWikiLink if _onSelect is not present
       if (linkPicker._onSelect) {
         linkPicker._onSelect(noteId, title);
+      } else {
+        insertWikiLink(title);
       }
-      insertWikiLink(title);
     });
+    
+    linkPicker.appendChild(btn);
   });
 }
 
@@ -275,6 +296,34 @@ function handleEditorKeydown(e) {
     if (e.key === 'ArrowDown' || e.key === 'ArrowUp') {
       // Let picker handle navigation
       return;
+    }
+    // Handle backspace
+    if (e.key === 'Backspace') {
+      const picker = document.querySelector('.link-picker');
+      if (picker && picker._query) {
+        const currentQuery = picker._query;
+        const newQuery = currentQuery.slice(0, -1);
+        picker._query = newQuery;
+        if (linkPickerCallback) {
+          linkPickerCallback(newQuery);
+        }
+        e.preventDefault();
+        return;
+      }
+    }
+    // Handle delete
+    if (e.key === 'Delete') {
+      const picker = document.querySelector('.link-picker');
+      if (picker && picker._query) {
+        const currentQuery = picker._query;
+        const newQuery = currentQuery.slice(0, -1);
+        picker._query = newQuery;
+        if (linkPickerCallback) {
+          linkPickerCallback(newQuery);
+        }
+        e.preventDefault();
+        return;
+      }
     }
     // Update query on typing
     if (e.key.length === 1 && !e.ctrlKey && !e.metaKey && !e.altKey) {

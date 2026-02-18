@@ -333,9 +333,9 @@ fn get_notes_metadata(db: State<Db>, sort_by: Option<String>) -> Result<Vec<Note
     let conn = db.0.lock().map_err(|e| e.to_string())?;
     
     let order_clause = match sort_by.as_deref() {
-        Some("created") => "ORDER BY created_at DESC",
-        Some("modified") => "ORDER BY updated_at DESC",
-        Some("title") => "ORDER BY title ASC, updated_at DESC",
+        Some("created") => "ORDER BY pinned DESC, created_at DESC",
+        Some("modified") => "ORDER BY pinned DESC, updated_at DESC",
+        Some("title") => "ORDER BY pinned DESC, title ASC, updated_at DESC",
         Some("manual") | None => "ORDER BY pinned DESC, sort_order ASC, updated_at DESC",
         _ => "ORDER BY pinned DESC, sort_order ASC, updated_at DESC",
     };

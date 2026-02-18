@@ -477,6 +477,7 @@ async function navigateToWikiLink(title) {
       createdAt: targetNote.createdAt,
       updatedAt: targetNote.updatedAt,
       pinned: targetNote.pinned,
+      starred: targetNote.starred || 0,
       sortOrder: targetNote.sortOrder,
     });
     await invoke('reorder_notes', { updates: unpinnedNotes.map(n => [n.id, n.sortOrder]) });
@@ -1315,7 +1316,7 @@ function showFolderContextMenu(e, folderId) {
         </button>
         ${availableFolders}
       </div>
-    </button>
+    </div>
     <div class="context-menu-separator"></div>
     <button class="context-menu-item danger" onclick="closeContextMenu(); deleteFolder('${folderId}')">
       ${icons.trash} Delete folder
@@ -1381,7 +1382,7 @@ async function addNote() {
   invoke('create_note', {
     id: note.id, folderId: note.folderId, title: note.title,
     body: note.body, createdAt: note.createdAt, updatedAt: note.updatedAt,
-    pinned: note.pinned, sortOrder: note.sortOrder
+    pinned: note.pinned, starred: note.starred || 0, sortOrder: note.sortOrder
   });
   invoke('reorder_notes', { updates: unpinnedNotes.map(n => [n.id, n.sortOrder]) });
 }
@@ -1617,12 +1618,17 @@ function changeSortMode(mode) {
 }
 
 function toggleFavoritesFilter() {
+  const wasEnabled = state.favoritesFilter;
   state.favoritesFilter = !state.favoritesFilter;
   // Clear active folder when entering favorites view
   if (state.favoritesFilter) {
     state.activeFolderId = null;
+    // Ensure notes list is refreshed for favorites
+    dirty.notesList = true;
+    renderNotesList();
+  } else {
+    render();
   }
-  render();
 }
 
 async function togglePinNote(id) {
@@ -2104,7 +2110,7 @@ async function useTemplate(id) {
   await invoke('create_note', {
     id: note.id, folderId: note.folderId, title: note.title,
     body: note.body, createdAt: note.createdAt, updatedAt: note.updatedAt,
-    pinned: note.pinned, sortOrder: note.sortOrder
+    pinned: note.pinned, starred: note.starred || 0, sortOrder: note.sortOrder
   });
   await invoke('reorder_notes', { updates: unpinnedNotes.map(n => [n.id, n.sortOrder]) });
 }
