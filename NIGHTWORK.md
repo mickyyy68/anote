@@ -3,7 +3,7 @@
 
 ## HUMAN
 I am the human.
-Install cargo to actually run all the tests.
+Install cargo to actually run all the tests. ✅ DONE (2026-02-18) - Installed via rustup, fixed Rust compilation errors in templates
 
 ## Overview
 This file contains tasks for nighttime autonomous development on the Anote project (https://github.com/mikeclaw68/anote).
@@ -132,6 +132,7 @@ ALTER TABLE notes ADD COLUMN starred INTEGER NOT NULL DEFAULT 0;
 - [x] Note templates (completed 2026-02-18)
 - [x] Favorites (completed 2026-02-18)
 - [x] Keyboard shortcuts (completed 2026-02-18)
+- [x] Install cargo + fix Rust compilation (completed 2026-02-18)
 
 ## Notes
 - The database schema already has `pinned` and `sort_order` columns
