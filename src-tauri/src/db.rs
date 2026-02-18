@@ -142,5 +142,30 @@ pub fn init_db(conn: &Connection) -> Result<(), String> {
             .map_err(|e| e.to_string())?;
     }
 
+    if version < 4 {
+        // Tags table
+        conn.execute_batch(
+            "CREATE TABLE IF NOT EXISTS tags (
+                id TEXT PRIMARY KEY,
+                name TEXT NOT NULL UNIQUE,
+                color TEXT DEFAULT '#888888'
+            )",
+        )
+        .map_err(|e| e.to_string())?;
+
+        // Note-tags relationship
+        conn.execute_batch(
+            "CREATE TABLE IF NOT EXISTS note_tags (
+                note_id TEXT NOT NULL REFERENCES notes(id) ON DELETE CASCADE,
+                tag_id TEXT NOT NULL REFERENCES tags(id) ON DELETE CASCADE,
+                PRIMARY KEY (note_id, tag_id)
+            )",
+        )
+        .map_err(|e| e.to_string())?;
+
+        conn.pragma_update(None, "user_version", 4)
+            .map_err(|e| e.to_string())?;
+    }
+
     Ok(())
 }

@@ -46,6 +46,13 @@ struct NoteMetadata {
     sort_order: i32,
 }
 
+#[derive(Serialize, Deserialize, Clone)]
+struct Tag {
+    id: String,
+    name: String,
+    color: String,
+}
+
 // ===== Folder commands =====
 
 #[tauri::command]
@@ -331,6 +338,114 @@ fn reorder_notes(db: State<Db>, updates: Vec<(String, i32)>) -> Result<(), Strin
 
 // ===== Data migration command =====
 
+// ===== Tag commands =====
+
+#[tauri::command]
+fn get_tags(db: State<Db>) -> Result<Vec<Tag>, String> {
+    let conn = db.0.lock().map_err(|e| e.to_string())?;
+    let mut stmt = conn
+        .prepare("SELECT id, name, color FROM tags ORDER BY name")
+        .map_err(|e| e.to_string())?;
+    let tags = stmt
+        .query_map([], |row| {
+            Ok(Tag {
+                id: row.get(0)?,
+                name: row.get(1)?,
+                color: row.get(2)?,
+            })
+        })
+        .map_err(|e| e.to_string())?
+        .collect::<Result<Vec<_>, _>>()
+        .map_err(|e| e.to_string())?;
+    Ok(tags)
+}
+
+#[tauri::command]
+fn create_tag(db: State<Db>, id: String, name: String, color: String) -> Result<Tag, String> {
+    let conn = db.0.lock().map_err(|e| e.to_string())?;
+    conn.execute(
+        "INSERT INTO tags (id, name, color) VALUES (?1, ?2, ?3)",
+        rusqlite::params![id, name, color],
+    )
+    .map_err(|e| e.to_string())?;
+    Ok(Tag { id, name, color })
+}
+
+#[tauri::command]
+fn delete_tag(db: State<Db>, id: String) -> Result<(), String> {
+    let conn = db.0.lock().map_err(|e| e.to_string())?;
+    conn.execute("DELETE FROM tags WHERE id = ?1", rusqlite::params![id])
+        .map_err(|e| e.to_string())?;
+    Ok(())
+}
+
+#[tauri::command]
+fn add_tag_to_note(db: State<Db>, note_id: String, tag_id: String) -> Result<(), String> {
+    let conn = db.0.lock().map_err(|e| e.to_string())?;
+    conn.execute(
+        "INSERT OR IGNORE INTO note_tags (note_id, tag_id) VALUES (?1, ?2)",
+        rusqlite::params![note_id, tag_id],
+    )
+    .map_err(|e| e.to_string())?;
+    Ok(())
+}
+
+#[tauri::command]
+fn remove_tag_from_note(db: State<Db>, note_id: String, tag_id: String) -> Result<(), String> {
+    let conn = db.0.lock().map_err(|e| e.to_string())?;
+    conn.execute(
+        "DELETE FROM note_tags WHERE note_id = ?1 AND tag_id = ?2",
+        rusqlite::params![note_id, tag_id],
+    )
+    .map_err(|e| e.to_string())?;
+    Ok(())
+}
+
+#[tauri::command]
+fn get_tags_for_note(db: State<Db>, note_id: String) -> Result<Vec<Tag>, String> {
+    let conn = db.0.lock().map_err(|e| e.to_string())?;
+    let mut stmt = conn
+        .prepare("SELECT t.id, t.name, t.color FROM tags t JOIN note_tags nt ON t.id = nt.tag_id WHERE nt.note_id = ?1 ORDER BY t.name")
+        .map_err(|e| e.to_string())?;
+    let tags = stmt
+        .query_map(rusqlite::params![note_id], |row| {
+            Ok(Tag {
+                id: row.get(0)?,
+                name: row.get(1)?,
+                color: row.get(2)?,
+            })
+        })
+        .map_err(|e| e.to_string())?
+        .collect::<Result<Vec<_>, _>>()
+        .map_err(|e| e.to_string())?;
+    Ok(tags)
+}
+
+#[tauri::command]
+fn get_notes_by_tag(db: State<Db>, tag_id: String) -> Result<Vec<NoteMetadata>, String> {
+    let conn = db.0.lock().map_err(|e| e.to_string())?;
+    let mut stmt = conn
+        .prepare("SELECT n.id, n.folder_id, n.title, substr(n.body, 1, 200), n.created_at, n.updated_at, n.pinned, n.sort_order FROM notes n JOIN note_tags nt ON n.id = nt.note_id WHERE nt.tag_id = ?1")
+        .map_err(|e| e.to_string())?;
+    let notes = stmt
+        .query_map(rusqlite::params![tag_id], |row| {
+            Ok(NoteMetadata {
+                id: row.get(0)?,
+                folder_id: row.get(1)?,
+                title: row.get(2)?,
+                preview: row.get(3)?,
+                created_at: row.get(4)?,
+                updated_at: row.get(5)?,
+                pinned: row.get(6)?,
+                sort_order: row.get(7)?,
+            })
+        })
+        .map_err(|e| e.to_string())?
+        .collect::<Result<Vec<_>, _>>()
+        .map_err(|e| e.to_string())?;
+    Ok(notes)
+}
+
 #[tauri::command]
 fn import_data(db: State<Db>, folders: Vec<Folder>, notes: Vec<Note>) -> Result<(), String> {
     let mut conn = db.0.lock().map_err(|e| e.to_string())?;
@@ -488,6 +603,13 @@ pub fn run() {
             delete_note,
             toggle_note_pinned,
             reorder_notes,
+            get_tags,
+            create_tag,
+            delete_tag,
+            add_tag_to_note,
+            remove_tag_from_note,
+            get_tags_for_note,
+            get_notes_by_tag,
             import_data,
             export_backup,
             get_sync_token,
