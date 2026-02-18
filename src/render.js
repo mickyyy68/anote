@@ -1,4 +1,5 @@
 import { invoke } from '@tauri-apps/api/core';
+import { save } from '@tauri-apps/plugin-dialog';
 import { icons } from './icons.js';
 import { state, DataLayer, loadTheme, saveTheme, generateId, formatDate, escapeHtml, rebuildIndexes } from './state.js';
 import { createEditor, destroyEditor, focusEditor, getEditorView, updateFindHighlights } from './editor.js';
@@ -1137,6 +1138,38 @@ async function deleteFolder(id) {
   await invoke('delete_folder', { id });
 }
 
+async function moveFolderTo(folderId, newParentId) {
+  const folder = state.foldersById.get(folderId);
+  if (!folder) return;
+  
+  const oldParentId = folder.parentId;
+  if (oldParentId === newParentId) return;
+  
+  folder.parentId = newParentId;
+  
+  // Expand the new parent so the folder is visible
+  if (newParentId) {
+    state.expandedFolders.add(newParentId);
+  }
+  
+  dirty.sidebar = true;
+  render();
+  
+  try {
+    await invoke('update_folder', {
+      id: folderId,
+      name: null,
+      parentId: newParentId
+    });
+  } catch (e) {
+    console.error('Failed to move folder:', e);
+    // Revert on error
+    folder.parentId = oldParentId;
+    dirty.sidebar = true;
+    render();
+  }
+}
+
 function getDescendantFolderIds(parentId) {
   const descendants = [];
   const children = getChildFolders(parentId);
@@ -1152,6 +1185,26 @@ function showFolderContextMenu(e, folderId) {
   e.stopPropagation();
   closeContextMenu();
 
+  // Get all folders except the current one and its descendants
+  const descendants = new Set();
+  function collectDescendants(id) {
+    descendants.add(id);
+    for (const f of state.data.folders) {
+      if (f.parentId === id) collectDescendants(f.id);
+    }
+  }
+  collectDescendants(folderId);
+
+  const availableFolders = state.data.folders
+    .filter(f => f.id !== folderId && !descendants.has(f.id))
+    .map(f => {
+      const indent = f.parentId ? ' ' : '';
+      return `<button class="context-menu-item" onclick="closeContextMenu(); moveFolderTo('${folderId}', '${f.id || ''}')">
+        ${indent}${escapeHtml(f.name)}${!f.parentId ? ' (root)' : ''}
+      </button>`;
+    })
+    .join('');
+
   const menu = document.createElement('div');
   menu.className = 'context-menu';
   menu.style.left = e.clientX + 'px';
@@ -1160,6 +1213,15 @@ function showFolderContextMenu(e, folderId) {
     <button class="context-menu-item" onclick="closeContextMenu(); startEditingFolder('${folderId}')">
       ${icons.edit} Rename
     </button>
+    <div class="context-menu-item has-submenu">
+      ${icons.folder} Move to...
+      <div class="context-submenu">
+        <button class="context-menu-item" onclick="closeContextMenu(); moveFolderTo('${folderId}', null)">
+          (root)
+        </button>
+        ${availableFolders}
+      </div>
+    </div>
     <div class="context-menu-separator"></div>
     <button class="context-menu-item danger" onclick="closeContextMenu(); deleteFolder('${folderId}')">
       ${icons.trash} Delete folder
@@ -1604,6 +1666,30 @@ async function togglePinNote(id) {
   invoke('reorder_notes', { updates: allFolderNotes.map(n => [n.id, n.sortOrder]) });
 }
 
+async function exportMarkdownNote(id) {
+  const note = state.notesById.get(id);
+  if (!note) return;
+
+  try {
+    // Flush any pending edits before exporting
+    flushPendingSaves();
+    
+    // Sanitize filename for filesystem safety
+    const rawTitle = (note.title || 'note').trim();
+    const safeTitle = rawTitle.replace(/[\\/:*?"<>|]+/g, '_') || 'note';
+    
+    const filePath = await save({
+      defaultPath: `${safeTitle}.md`,
+      filters: [{ name: 'Markdown', extensions: ['md'] }]
+    });
+    if (filePath) {
+      await DataLayer.exportNoteMarkdown(id, filePath);
+    }
+  } catch (e) {
+    console.error('Failed to export note:', e);
+  }
+}
+
 function showNoteContextMenu(e, noteId) {
   e.preventDefault();
   e.stopPropagation();
@@ -1637,6 +1723,9 @@ function showNoteContextMenu(e, noteId) {
   menu.innerHTML = `
     <button class="context-menu-item" onclick="closeContextMenu(); togglePinNote('${noteId}')">
       ${icons.pin} ${pinLabel}
+    </button>
+    <button class="context-menu-item" onclick="closeContextMenu(); exportMarkdownNote('${noteId}')">
+      ${icons.download} Export as Markdown
     </button>
     <div class="context-menu-separator"></div>
     <div class="context-menu-submenu">
@@ -1939,6 +2028,7 @@ window.startEditingFolder = startEditingFolder;
 window.finishEditingFolder = finishEditingFolder;
 window.handleFolderKeydown = handleFolderKeydown;
 window.deleteFolder = deleteFolder;
+window.moveFolderTo = moveFolderTo;
 window.toggleFolderExpanded = toggleFolderExpanded;
 window.toggleFolderMenu = toggleFolderMenu;
 window.closeFolderMenus = closeFolderMenus;
@@ -1964,6 +2054,7 @@ window.exportBackup = exportBackup;
 window.importBackup = importBackup;
 window.toggleSortMode = toggleSortMode;
 window.togglePinNote = togglePinNote;
+window.exportMarkdownNote = exportMarkdownNote;
 window.showNoteContextMenu = showNoteContextMenu;
 window.addTag = addTag;
 window.selectTag = selectTag;

@@ -11,6 +11,7 @@ This file contains tasks for nighttime autonomous development on the Anote proje
 ## Current PRs
 - **PR #1**: Raycast extension with bridge-backed writes + sync hardening (merged)
 - **PR #4**: Quick Note & Voice Note commands for Raycast (in progress)
+- **PR #5**: Export Markdown feature (completed 2026-02-18)
 
 ## Features to Implement
 
@@ -98,7 +99,7 @@ ALTER TABLE notes ADD COLUMN starred INTEGER NOT NULL DEFAULT 0;
 ## Working Instructions
 
 ### Setup
-1. Repository: `/home/mike/.openclaw/workspace/anote`
+1. Repository: /home/mike/.openclaw/workspace/anote
 2. Work on branches from `main`
 3. Push changes and create PRs regularly
 
@@ -122,11 +123,11 @@ ALTER TABLE notes ADD COLUMN starred INTEGER NOT NULL DEFAULT 0;
 
 ## Current Status
 - [x] Pin/star column exists in DB
-- [x] Tags system (completed 2026-02-18)
-- [ ] Export PDF (not started)
-- [ ] Export HTML (not started)
-- [ ] Export Markdown (not started)
-- [ ] Nested folders UI (partial, backend exists)
+- [ ] Tags system
+- [ ] Export PDF
+- [ ] Export HTML
+- [x] Export Markdown (completed 2026-02-18)
+- [x] Nested folders UI (completed 2026-02-18)
 - [ ] Note templates (not started)
 - [ ] Favorites (not started)
 - [ ] Keyboard shortcuts (not started)
