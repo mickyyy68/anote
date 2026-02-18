@@ -13,6 +13,7 @@ This file contains tasks for nighttime autonomous development on the Anote proje
 - **PR #4**: Quick Note & Voice Note commands for Raycast (in progress)
 - **PR #5**: Export Markdown feature (completed 2026-02-18)
 - **PR #6**: Favorites feature (completed 2026-02-18)
+- **PR #7**: Sort Options (completed 2026-02-18)
 
 ## Features to Implement
 
@@ -54,7 +55,7 @@ This file contains tasks for nighttime autonomous development on the Anote proje
 ### Phase 4: Nice to Have
 9. **Keyboard Shortcuts** - Cmd+N new note, Cmd+S save, etc.
 10. **Note Linking** - Wiki-style `[[note-title]]` links (COMPLETED 2026-02-18)
-11. **Sort Options** - By date created, date modified, title, manual
+11. **Sort Options** - By date created, date modified, title, manual (COMPLETED 2026-02-18)
 
 ## Database Schema Changes Needed
 
@@ -134,7 +135,7 @@ ALTER TABLE notes ADD COLUMN starred INTEGER NOT NULL DEFAULT 0;
 - [x] Keyboard shortcuts (completed 2026-02-18)
 - [x] Install cargo + fix Rust compilation (completed 2026-02-18)
 - [x] Note Linking - wiki-style [[note-title]] links (completed 2026-02-18)
-- [ ] Sort Options - By date created, date modified, title, manual
+- [x] Sort Options - By date created, date modified, title, manual (completed 2026-02-18)
 
 ## Notes
 - The database schema already has `pinned` and `sort_order` columns
