@@ -53,7 +53,7 @@ This file contains tasks for nighttime autonomous development on the Anote proje
 
 ### Phase 4: Nice to Have
 9. **Keyboard Shortcuts** - Cmd+N new note, Cmd+S save, etc.
-10. **Note Linking** - Wiki-style `[[note-title]]` links
+10. **Note Linking** - Wiki-style `[[note-title]]` links (COMPLETED 2026-02-18)
 11. **Sort Options** - By date created, date modified, title, manual
 
 ## Database Schema Changes Needed
@@ -133,7 +133,7 @@ ALTER TABLE notes ADD COLUMN starred INTEGER NOT NULL DEFAULT 0;
 - [x] Favorites (completed 2026-02-18)
 - [x] Keyboard shortcuts (completed 2026-02-18)
 - [x] Install cargo + fix Rust compilation (completed 2026-02-18)
-- [ ] Note Linking - wiki-style [[note-title]] links (IN PROGRESS)
+- [x] Note Linking - wiki-style [[note-title]] links (completed 2026-02-18)
 - [ ] Sort Options - By date created, date modified, title, manual
 
 ## Notes
