@@ -997,6 +997,38 @@ async function deleteFolder(id) {
   await invoke('delete_folder', { id });
 }
 
+async function moveFolderTo(folderId, newParentId) {
+  const folder = state.foldersById.get(folderId);
+  if (!folder) return;
+  
+  const oldParentId = folder.parentId;
+  if (oldParentId === newParentId) return;
+  
+  folder.parentId = newParentId;
+  
+  // Expand the new parent so the folder is visible
+  if (newParentId) {
+    state.expandedFolders.add(newParentId);
+  }
+  
+  dirty.sidebar = true;
+  render();
+  
+  try {
+    await invoke('update_folder', {
+      id: folderId,
+      name: null,
+      parentId: newParentId
+    });
+  } catch (e) {
+    console.error('Failed to move folder:', e);
+    // Revert on error
+    folder.parentId = oldParentId;
+    dirty.sidebar = true;
+    render();
+  }
+}
+
 function getDescendantFolderIds(parentId) {
   const descendants = [];
   const children = getChildFolders(parentId);
@@ -1012,6 +1044,26 @@ function showFolderContextMenu(e, folderId) {
   e.stopPropagation();
   closeContextMenu();
 
+  // Get all folders except the current one and its descendants
+  const descendants = new Set();
+  function collectDescendants(id) {
+    descendants.add(id);
+    for (const f of state.data.folders) {
+      if (f.parentId === id) collectDescendants(f.id);
+    }
+  }
+  collectDescendants(folderId);
+
+  const availableFolders = state.data.folders
+    .filter(f => f.id !== folderId && !descendants.has(f.id))
+    .map(f => {
+      const indent = f.parentId ? ' ' : '';
+      return `<button class="context-menu-item" onclick="closeContextMenu(); moveFolderTo('${folderId}', '${f.id || ''}')">
+        ${indent}${escapeHtml(f.name)}${!f.parentId ? ' (root)' : ''}
+      </button>`;
+    })
+    .join('');
+
   const menu = document.createElement('div');
   menu.className = 'context-menu';
   menu.style.left = e.clientX + 'px';
@@ -1019,6 +1071,15 @@ function showFolderContextMenu(e, folderId) {
   menu.innerHTML = `
     <button class="context-menu-item" onclick="closeContextMenu(); startEditingFolder('${folderId}')">
       ${icons.edit} Rename
+    </button>
+    <div class="context-menu-item has-submenu">
+      ${icons.folder} Move to...
+      <div class="context-submenu">
+        <button class="context-menu-item" onclick="closeContextMenu(); moveFolderTo('${folderId}', null)">
+          (root)
+        </button>
+        ${availableFolders}
+      </div>
     </button>
     <div class="context-menu-separator"></div>
     <button class="context-menu-item danger" onclick="closeContextMenu(); deleteFolder('${folderId}')">
@@ -1630,6 +1691,7 @@ window.startEditingFolder = startEditingFolder;
 window.finishEditingFolder = finishEditingFolder;
 window.handleFolderKeydown = handleFolderKeydown;
 window.deleteFolder = deleteFolder;
+window.moveFolderTo = moveFolderTo;
 window.toggleFolderExpanded = toggleFolderExpanded;
 window.toggleFolderMenu = toggleFolderMenu;
 window.closeFolderMenus = closeFolderMenus;

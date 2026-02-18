@@ -201,6 +201,46 @@ fn rename_folder(db: State<Db>, id: String, name: String) -> Result<(), String> 
 }
 
 #[tauri::command]
+fn update_folder(db: State<Db>, id: String, name: Option<String>, parent_id: Option<Option<String>>) -> Result<(), String> {
+    let conn = db.0.lock().map_err(|e| e.to_string())?;
+    // Validate that parent_id is not the folder's own id (prevent self-reference)
+    if let Some(Some(ref pid)) = parent_id {
+        if pid == &id {
+            return Err("folder cannot be its own parent".to_string());
+        }
+        // Check for circular reference (parent is a descendant of this folder)
+        let mut current = Some(pid.clone());
+        while let Some(curr) = current {
+            if curr == id {
+                return Err("cannot create circular folder reference".to_string());
+            }
+            let mut stmt = conn
+                .prepare("SELECT parent_id FROM folders WHERE id = ?1")
+                .map_err(|e| e.to_string())?;
+            current = stmt
+                .query_row(rusqlite::params![curr], |row| row.get(0))
+                .ok()
+                .flatten();
+        }
+    }
+    if let Some(n) = name {
+        conn.execute(
+            "UPDATE folders SET name = ?1 WHERE id = ?2",
+            rusqlite::params![n, id],
+        )
+        .map_err(|e| e.to_string())?;
+    }
+    if let Some(pid) = parent_id {
+        conn.execute(
+            "UPDATE folders SET parent_id = ?1 WHERE id = ?2",
+            rusqlite::params![pid, id],
+        )
+        .map_err(|e| e.to_string())?;
+    }
+    Ok(())
+}
+
+#[tauri::command]
 fn delete_folder(db: State<Db>, id: String) -> Result<(), String> {
     let conn = db.0.lock().map_err(|e| e.to_string())?;
     delete_folder_recursive(&conn, &id)?;
@@ -571,6 +611,7 @@ pub fn run() {
             get_folders,
             create_folder,
             rename_folder,
+            update_folder,
             delete_folder,
             get_notes_metadata,
             get_note_body,
