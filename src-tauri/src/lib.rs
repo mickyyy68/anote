@@ -563,7 +563,7 @@ fn export_backup(db: State<Db>) -> Result<String, String> {
 
     let now = chrono::Local::now();
     let backup = serde_json::json!({
-        "version": "1.0",
+        "version": "1.1",
         "exportedAt": now.timestamp_millis(),
         "folders": folders,
         "notes": notes
@@ -667,7 +667,9 @@ fn export_note_markdown(db: State<Db>, id: String, path: String) -> Result<(), S
     let (title, body) = note;
 
     // Format the markdown file with title as header
-    let markdown = format!("# {}\n\n{}", title, body);
+    // Escape # in title to prevent creating nested markdown headers
+    let escaped_title = title.replace('#', "\\#");
+    let markdown = format!("# {}\n\n{}", escaped_title, body);
 
     // Write to file
     std::fs::write(&path, markdown).map_err(|e| e.to_string())?;
