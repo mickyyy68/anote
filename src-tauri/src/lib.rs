@@ -153,7 +153,7 @@ fn init_db(conn: &Connection) {
 
 #[tauri::command]
 fn get_folders(db: State<Db>) -> Result<Vec<Folder>, String> {
-    let conn = db.0.lock().map_err(|e| e.to_string())?;
+    let mut conn = db.0.lock().map_err(|e| e.to_string())?;
     let mut stmt = conn
         .prepare("SELECT id, name, created_at, parent_id FROM folders ORDER BY created_at")
         .map_err(|e| e.to_string())?;
@@ -180,7 +180,7 @@ fn create_folder(
     created_at: i64,
     parent_id: Option<String>,
 ) -> Result<(), String> {
-    let conn = db.0.lock().map_err(|e| e.to_string())?;
+    let mut conn = db.0.lock().map_err(|e| e.to_string())?;
     conn.execute(
         "INSERT INTO folders (id, name, created_at, parent_id) VALUES (?1, ?2, ?3, ?4)",
         rusqlite::params![id, name, created_at, parent_id],
@@ -191,7 +191,7 @@ fn create_folder(
 
 #[tauri::command]
 fn rename_folder(db: State<Db>, id: String, name: String) -> Result<(), String> {
-    let conn = db.0.lock().map_err(|e| e.to_string())?;
+    let mut conn = db.0.lock().map_err(|e| e.to_string())?;
     conn.execute(
         "UPDATE folders SET name = ?1 WHERE id = ?2",
         rusqlite::params![name, id],
@@ -202,7 +202,7 @@ fn rename_folder(db: State<Db>, id: String, name: String) -> Result<(), String> 
 
 #[tauri::command]
 fn update_folder(db: State<Db>, id: String, name: Option<String>, parent_id: Option<Option<String>>) -> Result<(), String> {
-    let conn = db.0.lock().map_err(|e| e.to_string())?;
+    let mut conn = db.0.lock().map_err(|e| e.to_string())?;
     
     // Use transaction for atomicity
     let tx = conn.transaction().map_err(|e| e.to_string())?;
@@ -247,7 +247,7 @@ fn update_folder(db: State<Db>, id: String, name: Option<String>, parent_id: Opt
 
 #[tauri::command]
 fn delete_folder(db: State<Db>, id: String) -> Result<(), String> {
-    let conn = db.0.lock().map_err(|e| e.to_string())?;
+    let mut conn = db.0.lock().map_err(|e| e.to_string())?;
     delete_folder_recursive(&conn, &id)?;
     Ok(())
 }
@@ -280,7 +280,7 @@ fn delete_folder_recursive(conn: &Connection, id: &str) -> Result<(), String> {
 
 #[tauri::command]
 fn get_notes_metadata(db: State<Db>) -> Result<Vec<NoteMetadata>, String> {
-    let conn = db.0.lock().map_err(|e| e.to_string())?;
+    let mut conn = db.0.lock().map_err(|e| e.to_string())?;
     let mut stmt = conn
         .prepare("SELECT id, folder_id, title, substr(body, 1, 200), created_at, updated_at, pinned, sort_order FROM notes")
         .map_err(|e| e.to_string())?;
@@ -305,7 +305,7 @@ fn get_notes_metadata(db: State<Db>) -> Result<Vec<NoteMetadata>, String> {
 
 #[tauri::command]
 fn get_note_body(db: State<Db>, id: String) -> Result<String, String> {
-    let conn = db.0.lock().map_err(|e| e.to_string())?;
+    let mut conn = db.0.lock().map_err(|e| e.to_string())?;
     let body: String = conn
         .query_row(
             "SELECT body FROM notes WHERE id = ?1",
@@ -318,7 +318,7 @@ fn get_note_body(db: State<Db>, id: String) -> Result<String, String> {
 
 #[tauri::command]
 fn get_notes_all(db: State<Db>) -> Result<Vec<Note>, String> {
-    let conn = db.0.lock().map_err(|e| e.to_string())?;
+    let mut conn = db.0.lock().map_err(|e| e.to_string())?;
     let mut stmt = conn
         .prepare("SELECT id, folder_id, title, body, created_at, updated_at, pinned, sort_order FROM notes")
         .map_err(|e| e.to_string())?;
@@ -343,7 +343,7 @@ fn get_notes_all(db: State<Db>) -> Result<Vec<Note>, String> {
 
 #[tauri::command]
 fn search_notes(db: State<Db>, query: String) -> Result<Vec<NoteMetadata>, String> {
-    let conn = db.0.lock().map_err(|e| e.to_string())?;
+    let mut conn = db.0.lock().map_err(|e| e.to_string())?;
     // FTS5 MATCH query, joined back to notes for full metadata
     let mut stmt = conn
         .prepare(
@@ -387,7 +387,7 @@ fn create_note(
     pinned: i32,
     sort_order: i32,
 ) -> Result<(), String> {
-    let conn = db.0.lock().map_err(|e| e.to_string())?;
+    let mut conn = db.0.lock().map_err(|e| e.to_string())?;
     conn.execute(
         "INSERT INTO notes (id, folder_id, title, body, created_at, updated_at, pinned, sort_order) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8)",
         rusqlite::params![id, folder_id, title, body, created_at, updated_at, pinned, sort_order],
@@ -404,7 +404,7 @@ fn update_note(
     body: String,
     updated_at: i64,
 ) -> Result<(), String> {
-    let conn = db.0.lock().map_err(|e| e.to_string())?;
+    let mut conn = db.0.lock().map_err(|e| e.to_string())?;
     conn.execute(
         "UPDATE notes SET title = ?1, body = ?2, updated_at = ?3 WHERE id = ?4",
         rusqlite::params![title, body, updated_at, id],
@@ -415,7 +415,7 @@ fn update_note(
 
 #[tauri::command]
 fn delete_note(db: State<Db>, id: String) -> Result<(), String> {
-    let conn = db.0.lock().map_err(|e| e.to_string())?;
+    let mut conn = db.0.lock().map_err(|e| e.to_string())?;
     conn.execute("DELETE FROM notes WHERE id = ?1", rusqlite::params![id])
         .map_err(|e| e.to_string())?;
     Ok(())
@@ -425,7 +425,7 @@ fn delete_note(db: State<Db>, id: String) -> Result<(), String> {
 
 #[tauri::command]
 fn toggle_note_pinned(db: State<Db>, id: String, pinned: i32) -> Result<(), String> {
-    let conn = db.0.lock().map_err(|e| e.to_string())?;
+    let mut conn = db.0.lock().map_err(|e| e.to_string())?;
     conn.execute(
         "UPDATE notes SET pinned = ?1 WHERE id = ?2",
         rusqlite::params![pinned, id],
@@ -455,7 +455,7 @@ fn reorder_notes(db: State<Db>, updates: Vec<(String, i32)>) -> Result<(), Strin
         case_clauses.join(" "),
         ids.join(",")
     );
-    let conn = db.0.lock().map_err(|e| e.to_string())?;
+    let mut conn = db.0.lock().map_err(|e| e.to_string())?;
     conn.execute(&sql, []).map_err(|e| e.to_string())?;
     Ok(())
 }
@@ -488,7 +488,7 @@ fn import_data(db: State<Db>, folders: Vec<Folder>, notes: Vec<Note>) -> Result<
 
 #[tauri::command]
 fn export_backup(db: State<Db>) -> Result<String, String> {
-    let conn = db.0.lock().map_err(|e| e.to_string())?;
+    let mut conn = db.0.lock().map_err(|e| e.to_string())?;
 
     // Query all folders
     let mut folder_stmt = conn
@@ -555,7 +555,7 @@ fn export_backup(db: State<Db>) -> Result<String, String> {
 #[tauri::command]
 fn export_note_markdown(db: State<Db>, id: String, path: String) -> Result<(), String> {
     // Get note from database
-    let conn = db.0.lock().map_err(|e| e.to_string())?;
+    let mut conn = db.0.lock().map_err(|e| e.to_string())?;
     let note: (String, String) = conn
         .query_row(
             "SELECT title, body FROM notes WHERE id = ?1",

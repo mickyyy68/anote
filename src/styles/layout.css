@@ -431,7 +431,8 @@
   overflow-y: auto;
 }
 
-.context-menu-item.has-submenu:hover .context-submenu {
+.context-menu-item.has-submenu:hover .context-submenu,
+.context-menu-item.has-submenu:focus-within .context-submenu {
   display: block;
 }
 
