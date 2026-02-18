@@ -772,7 +772,7 @@ pub fn run() {
             app.manage(Db(Mutex::new(conn)));
 
             // Add dialog plugin for file save dialogs
-            app.handle().plugin(tauri_plugin_dialog::init());
+            app.handle().plugin(tauri_plugin_dialog::init()).expect("failed to initialize dialog plugin");
 
             if cfg!(debug_assertions) {
                 app.handle().plugin(
