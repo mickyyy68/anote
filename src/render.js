@@ -7,8 +7,9 @@ import { TextSelection } from '@milkdown/prose/state';
 
 // Track which note the editor is currently showing
 let currentEditorNoteId = null;
-// Track whether we need a full rebuild (layout changed) vs partial update
-let currentFolderId = null;
+// Track whether we need a full rebuild (layout changed) vs partial update.
+// We keep a coarse layout key (notes pane visible vs welcome state) instead of folder id.
+let currentLayoutKey = null;
 const MAX_COMMAND_RESULTS = 80;
 
 // Dirty flags — when set, render() updates only the flagged sections.
@@ -966,8 +967,9 @@ async function renderEditorPanel(focusTitle) {
 // Subsequent calls only update the parts that changed.
 export async function render(options = {}) {
   const app = document.getElementById('app');
-  const { activeFolderId, activeNoteId } = state;
-  const layoutChanged = !app.children.length || (currentFolderId === null) !== (activeFolderId === null);
+  const { activeFolderId, activeNoteId, activeTagId } = state;
+  const layoutKey = (activeFolderId || activeTagId) ? 'notes-pane' : null;
+  const layoutChanged = !app.children.length || currentLayoutKey !== layoutKey;
 
   if (layoutChanged || !app.children.length) {
     // Full skeleton rebuild
@@ -975,7 +977,7 @@ export async function render(options = {}) {
     currentEditorNoteId = null;
 
     const collapsedClass = state.sidebarCollapsed ? ' collapsed' : '';
-    if (!activeFolderId) {
+    if (!layoutKey) {
       app.innerHTML = `
         <aside class="sidebar${collapsedClass}" id="sidebar-root"></aside>
         <main class="main">
@@ -998,14 +1000,14 @@ export async function render(options = {}) {
         </main>
       `;
     }
-    currentFolderId = activeFolderId;
+    currentLayoutKey = layoutKey;
   }
 
   const selective = isDirtySet();
 
   if (!selective || dirty.sidebar) renderSidebar();
 
-  if (activeFolderId) {
+  if (layoutKey) {
     if (!selective || dirty.notesHeader) renderNotesHeader();
     if (!selective || dirty.notesList) renderNotesList();
 
@@ -1284,12 +1286,38 @@ async function addTag() {
   }
 }
 
-function selectTag(id) {
+async function hydrateTagFilter(tagId) {
+  if (!tagId) return [];
+  const tagNotes = await DataLayer.loadNotesByTag(tagId);
+  state.notesByTagId.set(tagId, tagNotes);
+
+  for (const note of state.data.notes) {
+    const noteTagSet = state.noteTags.get(note.id);
+    if (noteTagSet) noteTagSet.delete(tagId);
+  }
+
+  for (const note of tagNotes) {
+    let noteTagSet = state.noteTags.get(note.id);
+    if (!noteTagSet) {
+      noteTagSet = new Set();
+      state.noteTags.set(note.id, noteTagSet);
+    }
+    noteTagSet.add(tagId);
+  }
+
+  return tagNotes;
+}
+
+async function selectTag(id) {
+  if (state.findBarOpen) closeFindBar();
   if (state.activeTagId === id) {
     // Deselect tag (toggle off)
     state.activeTagId = null;
+    state.activeNoteId = null;
   } else {
     state.activeTagId = id;
+    const tagNotes = await hydrateTagFilter(id);
+    state.activeNoteId = tagNotes[0]?.id || null;
   }
   state.activeFolderId = null;
   dirty.sidebar = true;

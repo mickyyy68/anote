@@ -89,6 +89,7 @@ export const DataLayer = {
       state.notesCountByFolder.clear();
       state.tagsById.clear();
       state.notesByTagId.clear();
+      state.noteTags.clear();
     }
   },
   
@@ -113,6 +114,7 @@ export const DataLayer = {
       const tag = { id, name, color };
       state.data.tags.push(tag);
       state.tagsById.set(id, tag);
+      state.notesByTagId.set(id, []);
       return tag;
     } catch (e) {
       console.error('Failed to create tag:', e);
@@ -125,6 +127,10 @@ export const DataLayer = {
       await invoke('delete_tag', { id });
       state.data.tags = state.data.tags.filter(t => t.id !== id);
       state.tagsById.delete(id);
+      state.notesByTagId.delete(id);
+      for (const tagSet of state.noteTags.values()) {
+        tagSet.delete(id);
+      }
     } catch (e) {
       console.error('Failed to delete tag:', e);
       throw e;
