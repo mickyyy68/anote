@@ -1,3 +1,7 @@
+mod bridge_cli;
+mod db;
+pub use bridge_cli::maybe_run_from_args as maybe_run_bridge_cli;
+
 use rusqlite::Connection;
 use serde::{Deserialize, Serialize};
 use std::sync::Mutex;
@@ -41,6 +45,13 @@ struct NoteMetadata {
     sort_order: i32,
 }
 
+#[derive(Serialize, Deserialize, Clone)]
+struct Tag {
+    id: String,
+    name: String,
+    color: String,
+}
+
 fn init_db(conn: &Connection) {
     conn.execute_batch(
         "
@@ -69,6 +80,20 @@ fn init_db(conn: &Connection) {
         );
 
         CREATE INDEX IF NOT EXISTS idx_notes_folder ON notes(folder_id);
+
+        CREATE TABLE IF NOT EXISTS tags (
+            id TEXT PRIMARY KEY,
+            name TEXT NOT NULL UNIQUE,
+            color TEXT DEFAULT '#888888'
+        );
+
+        CREATE TABLE IF NOT EXISTS note_tags (
+            note_id TEXT NOT NULL REFERENCES notes(id) ON DELETE CASCADE,
+            tag_id TEXT NOT NULL REFERENCES tags(id) ON DELETE CASCADE,
+            PRIMARY KEY (note_id, tag_id)
+        );
+
+        CREATE INDEX IF NOT EXISTS idx_note_tags_tag_id ON note_tags(tag_id);
 
         CREATE VIRTUAL TABLE IF NOT EXISTS notes_fts USING fts5(
             title, body, content=notes, content_rowid=rowid
@@ -153,7 +178,7 @@ fn init_db(conn: &Connection) {
 
 #[tauri::command]
 fn get_folders(db: State<Db>) -> Result<Vec<Folder>, String> {
-    let conn = db.0.lock().map_err(|e| e.to_string())?;
+    let mut conn = db.0.lock().map_err(|e| e.to_string())?;
     let mut stmt = conn
         .prepare("SELECT id, name, created_at, parent_id FROM folders ORDER BY created_at")
         .map_err(|e| e.to_string())?;
@@ -180,7 +205,7 @@ fn create_folder(
     created_at: i64,
     parent_id: Option<String>,
 ) -> Result<(), String> {
-    let conn = db.0.lock().map_err(|e| e.to_string())?;
+    let mut conn = db.0.lock().map_err(|e| e.to_string())?;
     conn.execute(
         "INSERT INTO folders (id, name, created_at, parent_id) VALUES (?1, ?2, ?3, ?4)",
         rusqlite::params![id, name, created_at, parent_id],
@@ -191,7 +216,7 @@ fn create_folder(
 
 #[tauri::command]
 fn rename_folder(db: State<Db>, id: String, name: String) -> Result<(), String> {
-    let conn = db.0.lock().map_err(|e| e.to_string())?;
+    let mut conn = db.0.lock().map_err(|e| e.to_string())?;
     conn.execute(
         "UPDATE folders SET name = ?1 WHERE id = ?2",
         rusqlite::params![name, id],
@@ -201,8 +226,57 @@ fn rename_folder(db: State<Db>, id: String, name: String) -> Result<(), String> 
 }
 
 #[tauri::command]
+fn update_folder(db: State<Db>, id: String, name: Option<String>, parent_id: Option<Option<String>>) -> Result<(), String> {
+    let mut conn = db.0.lock().map_err(|e| e.to_string())?;
+    
+    // Use transaction for atomicity
+    let tx = conn.transaction().map_err(|e| e.to_string())?;
+    
+    // Validate that parent_id is not the folder's own id (prevent self-reference)
+    if let Some(Some(ref pid)) = parent_id {
+        if pid == &id {
+            return Err("folder cannot be its own parent".to_string());
+        }
+        // Check for circular reference (parent is a descendant of this folder)
+        let mut current = Some(pid.clone());
+        let mut seen = std::collections::HashSet::new();
+        while let Some(curr) = current {
+            if !seen.insert(curr.clone()) {
+                return Err("existing folder hierarchy contains a cycle".to_string());
+            }
+            if curr == id {
+                return Err("cannot create circular folder reference".to_string());
+            }
+            let mut stmt = tx
+                .prepare("SELECT parent_id FROM folders WHERE id = ?1")
+                .map_err(|e| e.to_string())?;
+            current = stmt
+                .query_row(rusqlite::params![curr], |row| row.get(0))
+                .ok()
+                .flatten();
+        }
+    }
+    if let Some(n) = name {
+        tx.execute(
+            "UPDATE folders SET name = ?1 WHERE id = ?2",
+            rusqlite::params![n, id],
+        )
+        .map_err(|e| e.to_string())?;
+    }
+    if let Some(pid) = parent_id {
+        tx.execute(
+            "UPDATE folders SET parent_id = ?1 WHERE id = ?2",
+            rusqlite::params![pid, id],
+        )
+        .map_err(|e| e.to_string())?;
+    }
+    tx.commit().map_err(|e| e.to_string())?;
+    Ok(())
+}
+
+#[tauri::command]
 fn delete_folder(db: State<Db>, id: String) -> Result<(), String> {
-    let conn = db.0.lock().map_err(|e| e.to_string())?;
+    let mut conn = db.0.lock().map_err(|e| e.to_string())?;
     delete_folder_recursive(&conn, &id)?;
     Ok(())
 }
@@ -235,7 +309,7 @@ fn delete_folder_recursive(conn: &Connection, id: &str) -> Result<(), String> {
 
 #[tauri::command]
 fn get_notes_metadata(db: State<Db>) -> Result<Vec<NoteMetadata>, String> {
-    let conn = db.0.lock().map_err(|e| e.to_string())?;
+    let mut conn = db.0.lock().map_err(|e| e.to_string())?;
     let mut stmt = conn
         .prepare("SELECT id, folder_id, title, substr(body, 1, 200), created_at, updated_at, pinned, sort_order FROM notes")
         .map_err(|e| e.to_string())?;
@@ -260,7 +334,7 @@ fn get_notes_metadata(db: State<Db>) -> Result<Vec<NoteMetadata>, String> {
 
 #[tauri::command]
 fn get_note_body(db: State<Db>, id: String) -> Result<String, String> {
-    let conn = db.0.lock().map_err(|e| e.to_string())?;
+    let mut conn = db.0.lock().map_err(|e| e.to_string())?;
     let body: String = conn
         .query_row(
             "SELECT body FROM notes WHERE id = ?1",
@@ -273,7 +347,7 @@ fn get_note_body(db: State<Db>, id: String) -> Result<String, String> {
 
 #[tauri::command]
 fn get_notes_all(db: State<Db>) -> Result<Vec<Note>, String> {
-    let conn = db.0.lock().map_err(|e| e.to_string())?;
+    let mut conn = db.0.lock().map_err(|e| e.to_string())?;
     let mut stmt = conn
         .prepare("SELECT id, folder_id, title, body, created_at, updated_at, pinned, sort_order FROM notes")
         .map_err(|e| e.to_string())?;
@@ -298,7 +372,7 @@ fn get_notes_all(db: State<Db>) -> Result<Vec<Note>, String> {
 
 #[tauri::command]
 fn search_notes(db: State<Db>, query: String) -> Result<Vec<NoteMetadata>, String> {
-    let conn = db.0.lock().map_err(|e| e.to_string())?;
+    let mut conn = db.0.lock().map_err(|e| e.to_string())?;
     // FTS5 MATCH query, joined back to notes for full metadata
     let mut stmt = conn
         .prepare(
@@ -342,7 +416,7 @@ fn create_note(
     pinned: i32,
     sort_order: i32,
 ) -> Result<(), String> {
-    let conn = db.0.lock().map_err(|e| e.to_string())?;
+    let mut conn = db.0.lock().map_err(|e| e.to_string())?;
     conn.execute(
         "INSERT INTO notes (id, folder_id, title, body, created_at, updated_at, pinned, sort_order) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8)",
         rusqlite::params![id, folder_id, title, body, created_at, updated_at, pinned, sort_order],
@@ -359,7 +433,7 @@ fn update_note(
     body: String,
     updated_at: i64,
 ) -> Result<(), String> {
-    let conn = db.0.lock().map_err(|e| e.to_string())?;
+    let mut conn = db.0.lock().map_err(|e| e.to_string())?;
     conn.execute(
         "UPDATE notes SET title = ?1, body = ?2, updated_at = ?3 WHERE id = ?4",
         rusqlite::params![title, body, updated_at, id],
@@ -370,17 +444,137 @@ fn update_note(
 
 #[tauri::command]
 fn delete_note(db: State<Db>, id: String) -> Result<(), String> {
-    let conn = db.0.lock().map_err(|e| e.to_string())?;
+    let mut conn = db.0.lock().map_err(|e| e.to_string())?;
     conn.execute("DELETE FROM notes WHERE id = ?1", rusqlite::params![id])
         .map_err(|e| e.to_string())?;
     Ok(())
+}
+
+// ===== Tag commands =====
+
+#[tauri::command]
+fn get_tags(db: State<Db>) -> Result<Vec<Tag>, String> {
+    let mut conn = db.0.lock().map_err(|e| e.to_string())?;
+    let mut stmt = conn
+        .prepare("SELECT id, name, color FROM tags ORDER BY name COLLATE NOCASE")
+        .map_err(|e| e.to_string())?;
+    let tags = stmt
+        .query_map([], |row| {
+            Ok(Tag {
+                id: row.get(0)?,
+                name: row.get(1)?,
+                color: row.get(2)?,
+            })
+        })
+        .map_err(|e| e.to_string())?
+        .collect::<Result<Vec<_>, _>>()
+        .map_err(|e| e.to_string())?;
+    Ok(tags)
+}
+
+#[tauri::command]
+fn create_tag(db: State<Db>, id: String, name: String, color: String) -> Result<(), String> {
+    let mut conn = db.0.lock().map_err(|e| e.to_string())?;
+    conn.execute(
+        "INSERT INTO tags (id, name, color) VALUES (?1, ?2, ?3)",
+        rusqlite::params![id, name, color],
+    )
+    .map_err(|e| e.to_string())?;
+    Ok(())
+}
+
+#[tauri::command]
+fn delete_tag(db: State<Db>, id: String) -> Result<(), String> {
+    let mut conn = db.0.lock().map_err(|e| e.to_string())?;
+    conn.execute("DELETE FROM tags WHERE id = ?1", rusqlite::params![id])
+        .map_err(|e| e.to_string())?;
+    Ok(())
+}
+
+#[tauri::command]
+fn add_tag_to_note(db: State<Db>, note_id: String, tag_id: String) -> Result<(), String> {
+    let mut conn = db.0.lock().map_err(|e| e.to_string())?;
+    conn.execute(
+        "INSERT OR IGNORE INTO note_tags (note_id, tag_id) VALUES (?1, ?2)",
+        rusqlite::params![note_id, tag_id],
+    )
+    .map_err(|e| e.to_string())?;
+    Ok(())
+}
+
+#[tauri::command]
+fn remove_tag_from_note(db: State<Db>, note_id: String, tag_id: String) -> Result<(), String> {
+    let mut conn = db.0.lock().map_err(|e| e.to_string())?;
+    conn.execute(
+        "DELETE FROM note_tags WHERE note_id = ?1 AND tag_id = ?2",
+        rusqlite::params![note_id, tag_id],
+    )
+    .map_err(|e| e.to_string())?;
+    Ok(())
+}
+
+#[tauri::command]
+fn get_tags_for_note(db: State<Db>, note_id: String) -> Result<Vec<Tag>, String> {
+    let mut conn = db.0.lock().map_err(|e| e.to_string())?;
+    let mut stmt = conn
+        .prepare(
+            "SELECT t.id, t.name, t.color
+             FROM tags t
+             INNER JOIN note_tags nt ON nt.tag_id = t.id
+             WHERE nt.note_id = ?1
+             ORDER BY t.name COLLATE NOCASE",
+        )
+        .map_err(|e| e.to_string())?;
+    let tags = stmt
+        .query_map(rusqlite::params![note_id], |row| {
+            Ok(Tag {
+                id: row.get(0)?,
+                name: row.get(1)?,
+                color: row.get(2)?,
+            })
+        })
+        .map_err(|e| e.to_string())?
+        .collect::<Result<Vec<_>, _>>()
+        .map_err(|e| e.to_string())?;
+    Ok(tags)
+}
+
+#[tauri::command]
+fn get_notes_by_tag(db: State<Db>, tag_id: String) -> Result<Vec<NoteMetadata>, String> {
+    let mut conn = db.0.lock().map_err(|e| e.to_string())?;
+    let mut stmt = conn
+        .prepare(
+            "SELECT n.id, n.folder_id, n.title, substr(n.body, 1, 200), n.created_at, n.updated_at, n.pinned, n.sort_order
+             FROM notes n
+             INNER JOIN note_tags nt ON nt.note_id = n.id
+             WHERE nt.tag_id = ?1
+             ORDER BY n.pinned DESC, n.updated_at DESC",
+        )
+        .map_err(|e| e.to_string())?;
+    let notes = stmt
+        .query_map(rusqlite::params![tag_id], |row| {
+            Ok(NoteMetadata {
+                id: row.get(0)?,
+                folder_id: row.get(1)?,
+                title: row.get(2)?,
+                preview: row.get(3)?,
+                created_at: row.get(4)?,
+                updated_at: row.get(5)?,
+                pinned: row.get(6)?,
+                sort_order: row.get(7)?,
+            })
+        })
+        .map_err(|e| e.to_string())?
+        .collect::<Result<Vec<_>, _>>()
+        .map_err(|e| e.to_string())?;
+    Ok(notes)
 }
 
 // ===== Pin & reorder commands =====
 
 #[tauri::command]
 fn toggle_note_pinned(db: State<Db>, id: String, pinned: i32) -> Result<(), String> {
-    let conn = db.0.lock().map_err(|e| e.to_string())?;
+    let mut conn = db.0.lock().map_err(|e| e.to_string())?;
     conn.execute(
         "UPDATE notes SET pinned = ?1 WHERE id = ?2",
         rusqlite::params![pinned, id],
@@ -410,7 +604,7 @@ fn reorder_notes(db: State<Db>, updates: Vec<(String, i32)>) -> Result<(), Strin
         case_clauses.join(" "),
         ids.join(",")
     );
-    let conn = db.0.lock().map_err(|e| e.to_string())?;
+    let mut conn = db.0.lock().map_err(|e| e.to_string())?;
     conn.execute(&sql, []).map_err(|e| e.to_string())?;
     Ok(())
 }
@@ -443,7 +637,7 @@ fn import_data(db: State<Db>, folders: Vec<Folder>, notes: Vec<Note>) -> Result<
 
 #[tauri::command]
 fn export_backup(db: State<Db>) -> Result<String, String> {
-    let conn = db.0.lock().map_err(|e| e.to_string())?;
+    let mut conn = db.0.lock().map_err(|e| e.to_string())?;
 
     // Query all folders
     let mut folder_stmt = conn
@@ -505,6 +699,41 @@ fn export_backup(db: State<Db>) -> Result<String, String> {
     Ok(file_path.to_string_lossy().to_string())
 }
 
+// ===== Export commands =====
+
+#[tauri::command]
+fn export_note_markdown(db: State<Db>, id: String, path: String) -> Result<(), String> {
+    // Basic validation: ensure path is absolute and doesn't contain traversal sequences
+    let path_obj = std::path::Path::new(&path);
+    if !path_obj.is_absolute() {
+        return Err("export path must be absolute".to_string());
+    }
+    for component in path_obj.components() {
+        if let std::path::Component::ParentDir = component {
+            return Err("export path must not contain '..'".to_string());
+        }
+    }
+
+    // Get note from database (narrow mutex scope to just the query)
+    let (title, body): (String, String) = {
+        let conn = db.0.lock().map_err(|e| e.to_string())?;
+        conn.query_row(
+            "SELECT title, body FROM notes WHERE id = ?1",
+            rusqlite::params![id],
+            |row| Ok((row.get(0)?, row.get(1)?)),
+        )
+        .map_err(|e| e.to_string())?
+    };
+
+    // Format the markdown file with title as header
+    let markdown = format!("# {}\n\n{}", title, body);
+
+    // Write to file
+    std::fs::write(&path, markdown).map_err(|e| e.to_string())?;
+
+    Ok(())
+}
+
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
     tauri::Builder::default()
@@ -530,6 +759,9 @@ pub fn run() {
 
             app.manage(Db(Mutex::new(conn)));
 
+            // Add dialog plugin for file save dialogs
+            app.handle().plugin(tauri_plugin_dialog::init()).expect("failed to initialize dialog plugin");
+
             if cfg!(debug_assertions) {
                 app.handle().plugin(
                     tauri_plugin_log::Builder::default()
@@ -543,6 +775,7 @@ pub fn run() {
             get_folders,
             create_folder,
             rename_folder,
+            update_folder,
             delete_folder,
             get_notes_metadata,
             get_note_body,
@@ -551,10 +784,18 @@ pub fn run() {
             create_note,
             update_note,
             delete_note,
+            get_tags,
+            create_tag,
+            delete_tag,
+            add_tag_to_note,
+            remove_tag_from_note,
+            get_tags_for_note,
+            get_notes_by_tag,
             toggle_note_pinned,
             reorder_notes,
             import_data,
             export_backup,
+            export_note_markdown,
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");

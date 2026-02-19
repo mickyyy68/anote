@@ -4,7 +4,7 @@ const STORAGE_KEY = 'anote_data';
 const THEME_KEY = 'anote_theme';
 
 export const state = {
-  data: { folders: [], notes: [] },
+  data: { folders: [], notes: [], tags: [] },
   activeFolderId: null,
   activeNoteId: null,
   editingFolderId: null,
@@ -20,11 +20,15 @@ export const state = {
   findMatches: [],
   findCurrentMatch: 0,
   expandedFolders: new Set(),
+  activeTagId: null,  // Filter by tag
   // In-memory indexes for O(1) lookups
   notesById: new Map(),
   foldersById: new Map(),
   notesByFolderId: new Map(),
   notesCountByFolder: new Map(),
+  tagsById: new Map(),
+  notesByTagId: new Map(),
+  noteTags: new Map(),  // noteId -> Set of tagIds
 };
 
 export function rebuildIndexes() {
@@ -32,16 +36,28 @@ export function rebuildIndexes() {
   state.foldersById.clear();
   state.notesByFolderId.clear();
   state.notesCountByFolder.clear();
+  state.tagsById.clear();
+  state.notesByTagId.clear();
+  state.noteTags.clear();
+  
   for (const f of state.data.folders) {
     state.foldersById.set(f.id, f);
     state.notesByFolderId.set(f.id, []);
     state.notesCountByFolder.set(f.id, 0);
   }
+  
+  for (const t of state.data.tags) {
+    state.tagsById.set(t.id, t);
+    state.notesByTagId.set(t.id, []);
+  }
+  
   for (const n of state.data.notes) {
     state.notesById.set(n.id, n);
     const list = state.notesByFolderId.get(n.folderId);
     if (list) list.push(n);
     state.notesCountByFolder.set(n.folderId, (state.notesCountByFolder.get(n.folderId) || 0) + 1);
+    // Initialize empty tag set for each note
+    state.noteTags.set(n.id, new Set());
   }
 }
 
@@ -50,6 +66,7 @@ export const DataLayer = {
     try {
       const folders = await invoke('get_folders');
       const notes = await invoke('get_notes_metadata');
+      const tags = await invoke('get_tags');
       state.data.folders = folders.map(f => ({
         id: f.id, name: f.name, createdAt: f.created_at, parentId: f.parent_id || null
       }));
@@ -59,14 +76,101 @@ export const DataLayer = {
         createdAt: n.created_at, updatedAt: n.updated_at,
         pinned: n.pinned || 0, sortOrder: n.sort_order || 0
       }));
+      state.data.tags = tags.map(t => ({
+        id: t.id, name: t.name, color: t.color
+      }));
       rebuildIndexes();
     } catch (e) {
       console.error('Failed to load data:', e);
-      state.data = { folders: [], notes: [] };
+      state.data = { folders: [], notes: [], tags: [] };
       state.notesById.clear();
       state.foldersById.clear();
       state.notesByFolderId.clear();
       state.notesCountByFolder.clear();
+      state.tagsById.clear();
+      state.notesByTagId.clear();
+      state.noteTags.clear();
+    }
+  },
+  
+  async loadNotesByTag(tagId) {
+    try {
+      const notes = await invoke('get_notes_by_tag', { tagId });
+      return notes.map(n => ({
+        id: n.id, folderId: n.folder_id, title: n.title,
+        preview: n.preview, body: null,
+        createdAt: n.created_at, updatedAt: n.updated_at,
+        pinned: n.pinned || 0, sortOrder: n.sort_order || 0
+      }));
+    } catch (e) {
+      console.error('Failed to load notes by tag:', e);
+      return [];
+    }
+  },
+  
+  async createTag(id, name, color) {
+    try {
+      await invoke('create_tag', { id, name, color });
+      const tag = { id, name, color };
+      state.data.tags.push(tag);
+      state.tagsById.set(id, tag);
+      state.notesByTagId.set(id, []);
+      return tag;
+    } catch (e) {
+      console.error('Failed to create tag:', e);
+      throw e;
+    }
+  },
+  
+  async deleteTag(id) {
+    try {
+      await invoke('delete_tag', { id });
+      state.data.tags = state.data.tags.filter(t => t.id !== id);
+      state.tagsById.delete(id);
+      state.notesByTagId.delete(id);
+      for (const tagSet of state.noteTags.values()) {
+        tagSet.delete(id);
+      }
+    } catch (e) {
+      console.error('Failed to delete tag:', e);
+      throw e;
+    }
+  },
+  
+  async addTagToNote(noteId, tagId) {
+    try {
+      await invoke('add_tag_to_note', { noteId, tagId });
+    } catch (e) {
+      console.error('Failed to add tag to note:', e);
+      throw e;
+    }
+  },
+  
+  async removeTagFromNote(noteId, tagId) {
+    try {
+      await invoke('remove_tag_from_note', { noteId, tagId });
+    } catch (e) {
+      console.error('Failed to remove tag from note:', e);
+      throw e;
+    }
+  },
+  
+  async getTagsForNote(noteId) {
+    try {
+      const tags = await invoke('get_tags_for_note', { noteId });
+      return tags.map(t => ({ id: t.id, name: t.name, color: t.color }));
+    } catch (e) {
+      console.error('Failed to get tags for note:', e);
+      return [];
+    }
+  },
+
+  async exportNoteMarkdown(noteId, path) {
+    try {
+      await invoke('export_note_markdown', { id: noteId, path });
+    } catch (e) {
+      console.error('Failed to export note as Markdown:', e);
+      throw e;
     }
   },
 };
